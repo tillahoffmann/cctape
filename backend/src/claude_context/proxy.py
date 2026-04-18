@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from httpx_sse._decoders import SSEDecoder
+from zstandard import compress
 
 ANTHROPIC_BASE_URL = "https://api.anthropic.com/"
 # Headers that describe a single connection hop, not the end-to-end request
@@ -38,7 +39,7 @@ async def _post_messages(request: Request):
     # Save the complete request entry.
     conn: sqlite3.Connection = request.app.state.conn
     values = {
-        "headers": json.dumps(request.headers.items()),
+        "headers": compress(json.dumps(request.headers.items()).encode()),
         "timestamp": datetime.now(UTC).isoformat(),
         "payload": await request.body(),
         "session_id": request.headers.get("x-claude-code-session-id"),
@@ -103,8 +104,10 @@ async def _post_messages(request: Request):
             values = {
                 "status_code": upstream.status_code,
                 "timestamp": timestamp,
-                "headers": json.dumps(list(upstream.headers.items())),
-                "payload": payload,
+                "headers": compress(
+                    json.dumps(list(upstream.headers.items())).encode()
+                ),
+                "payload": compress(payload),
                 "request_row_id": request_row_id,
                 **usage,
             }

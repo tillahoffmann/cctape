@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
+from zstandard import decompress
 
 from claude_context import create_app
 
@@ -54,6 +55,7 @@ def test_post_message(
             content=sample_request,
             headers={"x-claude-code-session-id": "testing-session-1234"},
         )
+        assert response.status_code == 200
         assert b"is there something" in response.content
     mock_send.assert_called_once()
 
@@ -62,8 +64,9 @@ def test_post_message(
             "SELECT id, session_id FROM requests"
         ).fetchone()
         assert session_id == "testing-session-1234"
-        referenced_row_id, output_tokens = conn.execute(
-            "SELECT request_row_id, output_tokens FROM responses"
+        referenced_row_id, output_tokens, payload = conn.execute(
+            "SELECT request_row_id, output_tokens, payload FROM responses"
         ).fetchone()
         assert request_row_id == referenced_row_id
         assert output_tokens == 21
+        assert b"is there something" in decompress(payload)

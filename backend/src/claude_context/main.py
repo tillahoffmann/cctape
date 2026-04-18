@@ -6,8 +6,11 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from .proxy import router as proxy_router
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 # Datetime conversion based on the somewhat dubious recommendations at
@@ -26,8 +29,12 @@ sqlite3.register_converter("datetime", convert_datetime)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    database = os.environ.get("CLAUDE_CONTEXT_DB", ".claude-context.db")
-    db_exists = Path(database).is_file()
+    database = (
+        Path(os.environ.get("CLAUDE_CONTEXT_DB", "~/.claude-context/claude-context.db"))
+        .expanduser()
+        .resolve()
+    )
+    db_exists = database.is_file()
 
     # Nested withs because one is async and one is sync.
     async with httpx.AsyncClient(timeout=None) as client:
@@ -45,4 +52,6 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     app.include_router(proxy_router)
+    if STATIC_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app
