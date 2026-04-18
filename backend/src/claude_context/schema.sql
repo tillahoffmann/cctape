@@ -23,6 +23,8 @@ CREATE TABLE responses (
     "input_tokens" INTEGER,
     "output_tokens" INTEGER,
     "cache_creation_input_tokens" INTEGER,
-    "cache_read_input_tokens" INTEGER
+    "cache_read_input_tokens" INTEGER,
+    "unified_5h_utilization" REAL,
+    "unified_7d_utilization" REAL
 );
 CREATE INDEX responses_request_id ON responses(request_row_id);

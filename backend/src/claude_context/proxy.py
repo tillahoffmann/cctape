@@ -109,6 +109,16 @@ async def _post_messages(request: Request):
                 ),
                 "payload": compress(payload),
                 "request_row_id": request_row_id,
+                "unified_5h_utilization": float(
+                    upstream.headers["anthropic-ratelimit-unified-5h-utilization"]
+                )
+                if "anthropic-ratelimit-unified-5h-utilization" in upstream.headers
+                else None,
+                "unified_7d_utilization": float(
+                    upstream.headers["anthropic-ratelimit-unified-7d-utilization"]
+                )
+                if "anthropic-ratelimit-unified-7d-utilization" in upstream.headers
+                else None,
                 **usage,
             }
             cursor = conn.execute(
@@ -122,7 +132,9 @@ async def _post_messages(request: Request):
                     input_tokens,
                     output_tokens,
                     cache_creation_input_tokens,
-                    cache_read_input_tokens
+                    cache_read_input_tokens,
+                    unified_5h_utilization,
+                    unified_7d_utilization
                 ) VALUES (
                     :status_code,
                     :timestamp,
@@ -132,7 +144,9 @@ async def _post_messages(request: Request):
                     :input_tokens,
                     :output_tokens,
                     :cache_creation_input_tokens,
-                    :cache_read_input_tokens
+                    :cache_read_input_tokens,
+                    :unified_5h_utilization,
+                    :unified_7d_utilization
                 )
                 """,
                 values,
