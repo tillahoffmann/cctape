@@ -8,3 +8,6 @@ __pycache__/
 build/
 dist/
 wheels/
+node_modules/
+backend/src/claude_context/static/
+
