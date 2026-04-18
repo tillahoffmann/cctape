@@ -1,0 +1,29 @@
+fail_fast: true
+repos:
+
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: bash -c 'uv run ruff format'
+        language: system
+        files: \.py$
+        pass_filenames: false
+      - id: ruff-check
+        name: ruff check
+        entry: bash -c 'uv run ruff check --fix'
+        language: system
+        files: \.py$
+        pass_filenames: false
+      - id: pyright
+        name: pyright
+        entry: bash -c 'uv run pyright'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: pytest
+        name: pytest
+        entry: bash -c 'CI=true uv run pytest -q --cov=src/claude_context'
+        language: system
+        pass_filenames: false
+        always_run: true

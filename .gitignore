@@ -1,0 +1,10 @@
+__pycache__/
+.claude-context.db
+.coverage
+.DS_Store
+.env
+.venv
+*.egg-info/
+build/
+dist/
+wheels/
