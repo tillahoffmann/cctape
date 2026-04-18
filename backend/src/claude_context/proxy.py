@@ -41,7 +41,7 @@ async def _post_messages(request: Request):
     values = {
         "headers": compress(json.dumps(request.headers.items()).encode()),
         "timestamp": datetime.now(UTC).isoformat(),
-        "payload": await request.body(),
+        "payload": compress(await request.body()),
         "session_id": request.headers.get("x-claude-code-session-id"),
     }
     cursor = conn.execute(

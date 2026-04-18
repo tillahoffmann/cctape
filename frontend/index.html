@@ -1,11 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Claude Context</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              border: 'rgb(39 39 42)',
+              bg: 'rgb(9 9 11)',
+              panel: 'rgb(24 24 27)',
+              muted: 'rgb(161 161 170)',
+            },
+          },
+        },
+      }
+    </script>
   </head>
-  <body>
+  <body class="bg-zinc-950 text-zinc-100 antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

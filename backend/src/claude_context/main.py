@@ -8,6 +8,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from .api import router as api_router
 from .proxy import router as proxy_router
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
+    app.include_router(api_router)
     app.include_router(proxy_router)
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
