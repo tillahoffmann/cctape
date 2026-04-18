@@ -34,6 +34,7 @@ async def lifespan(app: FastAPI):
         .expanduser()
         .resolve()
     )
+    database.parent.mkdir(exist_ok=True, parents=True)
     db_exists = database.is_file()
 
     # Nested withs because one is async and one is sync.
