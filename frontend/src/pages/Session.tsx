@@ -232,18 +232,11 @@ function MarkdownText({ children }: { children: string }) {
   )
 }
 
-type ViewMode = 'rendered' | 'plain' | 'raw'
+type ViewMode = 'rendered' | 'raw'
 
-function renderTextBlock(block: Block, key: number | string, mode: ViewMode) {
+function renderTextBlock(block: Block, key: number | string) {
   if (block.type !== 'text' || !block.text) return null
-  if (mode === 'rendered') {
-    return <MarkdownText key={key}>{block.text}</MarkdownText>
-  }
-  return (
-    <div key={key} className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-      {block.text}
-    </div>
-  )
+  return <MarkdownText key={key}>{block.text}</MarkdownText>
 }
 
 function renderUserBlock(block: Block, key: number) {
@@ -272,26 +265,25 @@ function fmtNum(n: number | null | undefined): string {
 function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (m: ViewMode) => void }) {
   const options: { value: ViewMode; label: string }[] = [
     { value: 'rendered', label: 'Rendered' },
-    { value: 'plain', label: 'Plain' },
     { value: 'raw', label: 'Raw' },
   ]
   return (
-    <div className="inline-flex rounded-md border overflow-hidden text-xs">
+    <span className="inline-flex gap-2 text-xs">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
-          className={`px-2 py-1 ${
+          className={
             mode === o.value
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-background hover:bg-muted'
-          } ${o.value !== 'rendered' ? 'border-l' : ''}`}
+              ? 'underline text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          }
         >
-          {o.label}
+          {o.label.toLowerCase()}
         </button>
       ))}
-    </div>
+    </span>
   )
 }
 
@@ -337,7 +329,7 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
       )}
       {turn.response && (
         <div className="space-y-2 max-w-[80%] mr-auto">
-          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span>Assistant · {formatTimestamp(turn.response.timestamp)}</span>
             <ViewModeToggle mode={mode} onChange={setMode} />
           </div>
@@ -352,7 +344,7 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
                   const result = b.id ? toolResults.get(b.id) : undefined
                   return <ToolUseBlock key={b.id ?? `tu-${i}`} toolUse={b} result={result} />
                 }
-                return renderTextBlock(b, i, mode)
+                return renderTextBlock(b, i)
               })}
               {parsed.thinking && <CollapsibleBlock label="thinking" body={parsed.thinking} />}
               {parsed.notice && !hasAssistantContent && (
