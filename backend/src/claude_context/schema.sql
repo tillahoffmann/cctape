@@ -29,14 +29,12 @@ CREATE TABLE responses (
 );
 CREATE INDEX responses_request_id ON responses(request_row_id);
 
--- Session metadata sourced from ~/.claude/sessions/<pid>.json. Those files only
--- exist while the Claude process is alive; persisting here keeps the launch
--- context available after the process exits.
+-- Session metadata sourced from the first entry of the JSONL transcript at
+-- ~/.claude/projects/<encoded-cwd>/<session_id>.jsonl.
 CREATE TABLE sessions (
     "session_id" TEXT PRIMARY KEY,
-    "pid" INTEGER NOT NULL,
     "cwd" TEXT,
     "started_at" DATETIME,
-    "kind" TEXT,
-    "entrypoint" TEXT
+    "git_branch" TEXT,
+    "is_sidechain" INTEGER
 );

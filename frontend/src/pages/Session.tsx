@@ -439,10 +439,11 @@ export default function Session() {
           <h2 className="text-lg font-semibold font-mono">{detail.session_id}</h2>
           <span className="text-xs text-muted-foreground">{detail.turns.length} turns</span>
         </div>
-        {(detail.cwd || detail.entrypoint || detail.started_at) && (
+        {(detail.cwd || detail.git_branch || detail.started_at || detail.is_sidechain) && (
           <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4">
             {detail.cwd && <span className="font-mono">{detail.cwd}</span>}
-            {detail.entrypoint && <span>entry: {detail.entrypoint}</span>}
+            {detail.git_branch && <span className="font-mono">branch: {detail.git_branch}</span>}
+            {detail.is_sidechain && <span>sidechain</span>}
             {detail.started_at && <span>started {formatTimestamp(detail.started_at)}</span>}
           </div>
         )}

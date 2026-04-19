@@ -44,7 +44,8 @@ class SessionSummary(BaseModel):
     first_message_preview: str | None
     peak_context_tokens: int | None
     cwd: str | None
-    entrypoint: str | None
+    git_branch: str | None
+    is_sidechain: bool | None
     started_at: datetime | None
 
 
@@ -73,7 +74,8 @@ class SessionDetail(BaseModel):
     session_id: str
     turns: list[Turn]
     cwd: str | None
-    entrypoint: str | None
+    git_branch: str | None
+    is_sidechain: bool | None
     started_at: datetime | None
 
 
@@ -149,7 +151,8 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
                 + COALESCE(resp.cache_read_input_tokens, 0)
             ) AS peak_context_tokens,
             s.cwd AS cwd,
-            s.entrypoint AS entrypoint,
+            s.git_branch AS git_branch,
+            s.is_sidechain AS is_sidechain,
             s.started_at AS started_at
         FROM requests r
         LEFT JOIN responses resp ON resp.request_row_id = r.id
@@ -200,7 +203,8 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             first_message_preview=previews.get(session_id),
             peak_context_tokens=peak_context_tokens or None,
             cwd=cwd,
-            entrypoint=entrypoint,
+            git_branch=git_branch,
+            is_sidechain=bool(is_sidechain) if is_sidechain is not None else None,
             started_at=_dt(started_at) if started_at else None,
         )
         for (
@@ -214,7 +218,8 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             cache_read_input_tokens,
             peak_context_tokens,
             cwd,
-            entrypoint,
+            git_branch,
+            is_sidechain,
             started_at,
         ) in rows
     ]
@@ -248,10 +253,12 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
         raise HTTPException(status_code=404, detail="session not found")
 
     meta = conn.execute(
-        "SELECT cwd, entrypoint, started_at FROM sessions WHERE session_id = ?",
+        "SELECT cwd, git_branch, is_sidechain, started_at FROM sessions WHERE session_id = ?",
         (session_id,),
     ).fetchone()
-    cwd, entrypoint, started_at = meta if meta else (None, None, None)
+    cwd, git_branch, is_sidechain, started_at = (
+        meta if meta else (None, None, None, None)
+    )
 
     decompressor = ZstdDecompressor()
     turns: list[Turn] = []
@@ -317,7 +324,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
         session_id=session_id,
         turns=turns,
         cwd=cwd,
-        entrypoint=entrypoint,
+        git_branch=git_branch,
+        is_sidechain=bool(is_sidechain) if is_sidechain is not None else None,
         started_at=(
             started_at
             if isinstance(started_at, datetime) or started_at is None

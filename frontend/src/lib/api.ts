@@ -20,7 +20,8 @@ export interface SessionSummary {
   first_message_preview: string | null
   peak_context_tokens: number | null
   cwd: string | null
-  entrypoint: string | null
+  git_branch: string | null
+  is_sidechain: boolean | null
   started_at: string | null
 }
 
@@ -50,7 +51,8 @@ export interface SessionDetail {
   session_id: string
   turns: Turn[]
   cwd: string | null
-  entrypoint: string | null
+  git_branch: string | null
+  is_sidechain: boolean | null
   started_at: string | null
 }
 

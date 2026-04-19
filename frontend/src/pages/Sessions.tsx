@@ -45,7 +45,7 @@ export default function Sessions() {
           <TableRow>
             <TableHead>Session</TableHead>
             <TableHead>Project</TableHead>
-            <TableHead>Entry</TableHead>
+            <TableHead>Branch</TableHead>
             <TableHead>Last</TableHead>
             <TableHead className="text-right">Turns</TableHead>
             <TableHead className="text-right">In</TableHead>
@@ -64,8 +64,8 @@ export default function Sessions() {
               <TableCell className="font-mono text-xs" title={s.cwd ?? ''}>
                 {basename(s.cwd)}
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {s.entrypoint ?? '—'}
+              <TableCell className="font-mono text-xs">
+                {s.git_branch ?? '—'}
               </TableCell>
               <TableCell>{formatTimestamp(s.last_timestamp)}</TableCell>
               <TableCell className="text-right tabular-nums">{s.turn_count}</TableCell>
