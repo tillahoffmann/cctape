@@ -9,6 +9,8 @@ from fastapi.responses import StreamingResponse
 from httpx_sse._decoders import SSEDecoder
 from zstandard import compress
 
+from .sessions import ensure_known as ensure_session_known
+
 ANTHROPIC_BASE_URL = "https://api.anthropic.com/"
 # Headers that describe a single connection hop, not the end-to-end request
 # (RFC 7230 §6.1), plus `host` and `content-length` which httpx/Starlette must
@@ -55,6 +57,8 @@ async def _post_messages(request: Request):
         print("ERROR: Failed to insert request.")
     request_row_id = cursor.lastrowid
     conn.commit()
+
+    ensure_session_known(conn, values["session_id"])
 
     # Send the request, excluding headers that should not be proxied.
     client: httpx.AsyncClient = request.app.state.http_client

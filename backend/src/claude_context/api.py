@@ -42,6 +42,10 @@ class SessionSummary(BaseModel):
     cache_creation_input_tokens: int | None
     cache_read_input_tokens: int | None
     first_message_preview: str | None
+    peak_context_tokens: int | None
+    cwd: str | None
+    entrypoint: str | None
+    started_at: datetime | None
 
 
 class RequestRecord(BaseModel):
@@ -68,6 +72,9 @@ class Turn(BaseModel):
 class SessionDetail(BaseModel):
     session_id: str
     turns: list[Turn]
+    cwd: str | None
+    entrypoint: str | None
+    started_at: datetime | None
 
 
 @router.get("/usage")
@@ -135,9 +142,18 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             SUM(resp.input_tokens) AS input_tokens,
             SUM(resp.output_tokens) AS output_tokens,
             SUM(resp.cache_creation_input_tokens) AS cache_creation_input_tokens,
-            SUM(resp.cache_read_input_tokens) AS cache_read_input_tokens
+            SUM(resp.cache_read_input_tokens) AS cache_read_input_tokens,
+            MAX(
+                COALESCE(resp.input_tokens, 0)
+                + COALESCE(resp.cache_creation_input_tokens, 0)
+                + COALESCE(resp.cache_read_input_tokens, 0)
+            ) AS peak_context_tokens,
+            s.cwd AS cwd,
+            s.entrypoint AS entrypoint,
+            s.started_at AS started_at
         FROM requests r
         LEFT JOIN responses resp ON resp.request_row_id = r.id
+        LEFT JOIN sessions s ON s.session_id = r.session_id
         WHERE r.session_id IS NOT NULL
         GROUP BY r.session_id
         ORDER BY last_timestamp DESC
@@ -182,6 +198,10 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             cache_creation_input_tokens=cache_creation_input_tokens,
             cache_read_input_tokens=cache_read_input_tokens,
             first_message_preview=previews.get(session_id),
+            peak_context_tokens=peak_context_tokens or None,
+            cwd=cwd,
+            entrypoint=entrypoint,
+            started_at=_dt(started_at) if started_at else None,
         )
         for (
             session_id,
@@ -192,6 +212,10 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             output_tokens,
             cache_creation_input_tokens,
             cache_read_input_tokens,
+            peak_context_tokens,
+            cwd,
+            entrypoint,
+            started_at,
         ) in rows
     ]
 
@@ -222,6 +246,12 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
 
     if not rows:
         raise HTTPException(status_code=404, detail="session not found")
+
+    meta = conn.execute(
+        "SELECT cwd, entrypoint, started_at FROM sessions WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    cwd, entrypoint, started_at = meta if meta else (None, None, None)
 
     decompressor = ZstdDecompressor()
     turns: list[Turn] = []
@@ -283,4 +313,14 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             )
         )
 
-    return SessionDetail(session_id=session_id, turns=turns)
+    return SessionDetail(
+        session_id=session_id,
+        turns=turns,
+        cwd=cwd,
+        entrypoint=entrypoint,
+        started_at=(
+            started_at
+            if isinstance(started_at, datetime) or started_at is None
+            else datetime.fromisoformat(started_at)
+        ),
+    )

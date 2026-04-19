@@ -18,6 +18,12 @@ function formatTokens(n: number | null): string {
   return String(n)
 }
 
+function basename(path: string | null): string {
+  if (!path) return '—'
+  const parts = path.replace(/\/$/, '').split('/')
+  return parts[parts.length - 1] || path
+}
+
 export default function Sessions() {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -38,13 +44,13 @@ export default function Sessions() {
         <TableHeader>
           <TableRow>
             <TableHead>Session</TableHead>
-            <TableHead>First</TableHead>
+            <TableHead>Project</TableHead>
+            <TableHead>Entry</TableHead>
             <TableHead>Last</TableHead>
             <TableHead className="text-right">Turns</TableHead>
             <TableHead className="text-right">In</TableHead>
             <TableHead className="text-right">Out</TableHead>
-            <TableHead className="text-right">Cache R</TableHead>
-            <TableHead>Preview</TableHead>
+            <TableHead className="text-right">Peak Ctx</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -55,15 +61,19 @@ export default function Sessions() {
                   {s.session_id.slice(0, 8)}…
                 </Link>
               </TableCell>
-              <TableCell>{formatTimestamp(s.first_timestamp)}</TableCell>
+              <TableCell className="font-mono text-xs" title={s.cwd ?? ''}>
+                {basename(s.cwd)}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {s.entrypoint ?? '—'}
+              </TableCell>
               <TableCell>{formatTimestamp(s.last_timestamp)}</TableCell>
               <TableCell className="text-right tabular-nums">{s.turn_count}</TableCell>
               <TableCell className="text-right tabular-nums">{formatTokens(s.input_tokens)}</TableCell>
               <TableCell className="text-right tabular-nums">{formatTokens(s.output_tokens)}</TableCell>
               <TableCell className="text-right tabular-nums">
-                {formatTokens(s.cache_read_input_tokens)}
+                {formatTokens(s.peak_context_tokens)}
               </TableCell>
-              <TableCell className="max-w-md truncate">{s.first_message_preview ?? '—'}</TableCell>
             </TableRow>
           ))}
         </TableBody>

@@ -28,3 +28,15 @@ CREATE TABLE responses (
     "unified_7d_utilization" REAL
 );
 CREATE INDEX responses_request_id ON responses(request_row_id);
+
+-- Session metadata sourced from ~/.claude/sessions/<pid>.json. Those files only
+-- exist while the Claude process is alive; persisting here keeps the launch
+-- context available after the process exits.
+CREATE TABLE sessions (
+    "session_id" TEXT PRIMARY KEY,
+    "pid" INTEGER NOT NULL,
+    "cwd" TEXT,
+    "started_at" DATETIME,
+    "kind" TEXT,
+    "entrypoint" TEXT
+);

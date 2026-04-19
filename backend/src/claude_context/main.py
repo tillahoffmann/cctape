@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
 from .proxy import router as proxy_router
+from .sessions import sync_all as sync_sessions
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
             if not db_exists:
                 schema_path = Path(__file__).parent / "schema.sql"
                 conn.executescript(schema_path.read_text())
+            sync_sessions(conn)
             yield
 
 

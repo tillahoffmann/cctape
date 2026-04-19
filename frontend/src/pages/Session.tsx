@@ -431,12 +431,21 @@ export default function Session() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center gap-3">
-        <Link to="/sessions" className="underline text-sm">
-          ← Sessions
-        </Link>
-        <h2 className="text-lg font-semibold font-mono">{detail.session_id}</h2>
-        <span className="text-xs text-muted-foreground">{detail.turns.length} turns</span>
+      <div className="mb-4 space-y-1">
+        <div className="flex items-center gap-3">
+          <Link to="/sessions" className="underline text-sm">
+            ← Sessions
+          </Link>
+          <h2 className="text-lg font-semibold font-mono">{detail.session_id}</h2>
+          <span className="text-xs text-muted-foreground">{detail.turns.length} turns</span>
+        </div>
+        {(detail.cwd || detail.entrypoint || detail.started_at) && (
+          <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4">
+            {detail.cwd && <span className="font-mono">{detail.cwd}</span>}
+            {detail.entrypoint && <span>entry: {detail.entrypoint}</span>}
+            {detail.started_at && <span>started {formatTimestamp(detail.started_at)}</span>}
+          </div>
+        )}
       </div>
       <div className="space-y-6">
         {detail.turns.map((t) => (

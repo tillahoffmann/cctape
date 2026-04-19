@@ -18,6 +18,10 @@ export interface SessionSummary {
   cache_creation_input_tokens: number | null
   cache_read_input_tokens: number | null
   first_message_preview: string | null
+  peak_context_tokens: number | null
+  cwd: string | null
+  entrypoint: string | null
+  started_at: string | null
 }
 
 export interface RequestRecord {
@@ -45,6 +49,9 @@ export interface Turn {
 export interface SessionDetail {
   session_id: string
   turns: Turn[]
+  cwd: string | null
+  entrypoint: string | null
+  started_at: string | null
 }
 
 async function getJSON<T>(url: string): Promise<T> {
