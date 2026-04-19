@@ -3,6 +3,8 @@ import { useEffect } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { api, type SessionDetail, type Turn } from '../lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -178,17 +180,30 @@ function ToolBlock({ label, body }: { label: string; body: string }) {
   )
 }
 
+function normalizeMathDelimiters(src: string): string {
+  // Convert LaTeX-style \(...\) and \[...\] to $...$ and $$...$$ for remark-math.
+  // Use placeholders to avoid interfering with escaped backslashes in code blocks
+  // is out of scope — assistant math typically isn't wrapped in code.
+  return src
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_m, inner) => `$$${inner}$$`)
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_m, inner) => `$${inner}$`)
+}
+
 function MarkdownText({ children }: { children: string }) {
   return (
     <div className="text-sm leading-relaxed break-words [&_p]:my-2 [&_ul]:list-disc [&_ul]:ml-5 [&_ol]:list-decimal [&_ol]:ml-5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:bg-muted [&_code]:rounded [&_pre]:p-3 [&_pre]:bg-muted [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:font-semibold [&_h3]:mt-2 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+        {normalizeMathDelimiters(children)}
+      </ReactMarkdown>
     </div>
   )
 }
 
-function renderBlock(block: Block, key: number, markdown = false) {
+type ViewMode = 'rendered' | 'plain' | 'raw'
+
+function renderBlock(block: Block, key: number, mode: ViewMode = 'plain') {
   if (block.type === 'text' && block.text) {
-    if (markdown) {
+    if (mode === 'rendered') {
       return <MarkdownText key={key}>{block.text}</MarkdownText>
     }
     return (
@@ -222,7 +237,38 @@ function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString()
 }
 
+function fmtNum(n: number | null | undefined): string {
+  return n == null ? '—' : n.toLocaleString()
+}
+
+function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (m: ViewMode) => void }) {
+  const options: { value: ViewMode; label: string }[] = [
+    { value: 'rendered', label: 'Rendered' },
+    { value: 'plain', label: 'Plain' },
+    { value: 'raw', label: 'Raw' },
+  ]
+  return (
+    <div className="inline-flex rounded-md border overflow-hidden text-xs">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={`px-2 py-1 ${
+            mode === o.value
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-background hover:bg-muted'
+          } ${o.value !== 'rendered' ? 'border-l' : ''}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function TurnView({ turn }: { turn: Turn }) {
+  const [mode, setMode] = useState<ViewMode>('rendered')
   const messages = (turn.request.payload?.messages ?? []) as unknown[]
   const lastUser = messages[messages.length - 1]
   const userBlocks = blocksFromRequestMessage(lastUser)
@@ -246,28 +292,37 @@ function TurnView({ turn }: { turn: Turn }) {
       {turn.response && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">
-              Assistant · {formatTimestamp(turn.response.timestamp)}
+            <CardTitle className="text-sm flex items-center justify-between gap-3">
+              <span>Assistant · {formatTimestamp(turn.response.timestamp)}</span>
+              <ViewModeToggle mode={mode} onChange={setMode} />
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {assistantBlocks.map((b, i) => renderBlock(b, i, true))}
-            {parsed.thinking && (
-              <ToolBlock label="thinking" body={parsed.thinking} />
-            )}
-            {parsed.notice && !hasContent && (
-              <div className="rounded-md border border-destructive/50 bg-destructive/5 text-destructive px-3 py-2 text-sm">
-                <div className="font-medium">No renderable content</div>
-                <div className="text-xs mt-1">{parsed.notice}</div>
-              </div>
-            )}
-            {parsed.raw && !hasContent && (
-              <ToolBlock label="raw response body" body={parsed.raw} />
+            {mode === 'raw' ? (
+              <pre className="text-xs overflow-x-auto p-3 bg-muted rounded-md whitespace-pre-wrap break-words">
+                {turn.response.payload ?? '(empty response body)'}
+              </pre>
+            ) : (
+              <>
+                {assistantBlocks.map((b, i) => renderBlock(b, i, mode))}
+                {parsed.thinking && (
+                  <ToolBlock label="thinking" body={parsed.thinking} />
+                )}
+                {parsed.notice && !hasContent && (
+                  <div className="rounded-md border border-destructive/50 bg-destructive/5 text-destructive px-3 py-2 text-sm">
+                    <div className="font-medium">No renderable content</div>
+                    <div className="text-xs mt-1">{parsed.notice}</div>
+                  </div>
+                )}
+                {parsed.raw && !hasContent && (
+                  <ToolBlock label="raw response body" body={parsed.raw} />
+                )}
+              </>
             )}
             <div className="text-xs text-muted-foreground pt-2">
-              {turn.response.input_tokens ?? '—'} in · {turn.response.output_tokens ?? '—'} out
+              {fmtNum(turn.response.input_tokens)} in · {fmtNum(turn.response.output_tokens)} out
               {turn.response.cache_read_input_tokens != null &&
-                ` · ${turn.response.cache_read_input_tokens} cache`}
+                ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache`}
             </div>
           </CardContent>
         </Card>
