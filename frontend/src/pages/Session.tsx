@@ -6,7 +6,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { api, type SessionDetail, type Turn } from '../lib/api'
 import { formatTimestamp } from '../lib/time'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Collapsible,
   CollapsibleContent,
@@ -311,23 +311,25 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
   const hasAssistantContent = parsed.blocks.length > 0
 
   return (
-    <div className="space-y-3">
+    <div id={`msg-${turn.request.id}`} data-turn-id={turn.request.id} className="space-y-3 scroll-mt-20">
       {showUser && (
         <div className="flex justify-end">
-          <Card className="max-w-[80%]">
-            <CardHeader>
-              <CardTitle className="text-sm">User · {formatTimestamp(turn.request.timestamp)}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {visibleUserBlocks.map((b, i) => renderUserBlock(b, i))}
-            </CardContent>
-          </Card>
+          <div className="max-w-[80%] space-y-2">
+            <div className="text-xs text-muted-foreground">
+              {formatTimestamp(turn.request.timestamp)}
+            </div>
+            <Card>
+              <CardContent className="space-y-2">
+                {visibleUserBlocks.map((b, i) => renderUserBlock(b, i))}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       )}
       {turn.response && (
         <div className="space-y-2 max-w-[80%] mr-auto">
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span>Assistant · {formatTimestamp(turn.response.timestamp)}</span>
+            <span>{formatTimestamp(turn.response.timestamp)}</span>
             <ViewModeToggle mode={mode} onChange={setMode} />
           </div>
           {mode === 'raw' ? (
@@ -380,6 +382,49 @@ export default function Session() {
     () => (detail ? buildToolResultMap(detail.turns) : new Map<string, Block>()),
     [detail],
   )
+
+  useEffect(() => {
+    if (!detail) return
+    const hash = window.location.hash.slice(1)
+    if (hash) {
+      const el = document.getElementById(hash)
+      if (el) {
+        requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }))
+      }
+    }
+  }, [detail])
+
+  useEffect(() => {
+    if (!detail) return
+    const headerOffset = 56
+    let frame = 0
+    const onScroll = () => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        const nodes = document.querySelectorAll<HTMLElement>('[data-turn-id]')
+        let topmost: HTMLElement | null = null
+        for (const node of nodes) {
+          const rect = node.getBoundingClientRect()
+          if (rect.bottom > headerOffset) {
+            topmost = node
+            break
+          }
+        }
+        if (topmost) {
+          const id = `msg-${topmost.dataset.turnId}`
+          if (window.location.hash.slice(1) !== id) {
+            window.history.replaceState(null, '', `#${id}`)
+          }
+        }
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [detail])
 
   if (error) return <div className="text-destructive">Error: {error}</div>
   if (!detail) return <div className="text-muted-foreground">Loading…</div>

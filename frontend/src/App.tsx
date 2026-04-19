@@ -19,7 +19,7 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b">
+      <header className="border-b sticky top-0 z-50 bg-background">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center gap-6">
           <h1 className="text-sm font-semibold">Claude Context</h1>
           <nav className="flex items-center gap-1">
