@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -33,8 +32,7 @@ function blocksFromRequestMessage(message: unknown): Block[] {
 }
 
 interface ParsedResponse {
-  text: string
-  tools: Block[]
+  blocks: Block[]
   thinking: string
   notice: string | null
   raw: string | null
@@ -42,12 +40,11 @@ interface ParsedResponse {
 
 function parseResponse(payload: string | null): ParsedResponse {
   if (!payload) {
-    return { text: '', tools: [], thinking: '', notice: 'Empty response body.', raw: null }
+    return { blocks: [], thinking: '', notice: 'Empty response body.', raw: null }
   }
 
   const trimmed = payload.trimStart()
 
-  // Non-streaming JSON response (error or non-stream request)
   if (trimmed.startsWith('{')) {
     try {
       const obj = JSON.parse(trimmed) as {
@@ -57,36 +54,24 @@ function parseResponse(payload: string | null): ParsedResponse {
       }
       if (obj.type === 'error' || obj.error) {
         return {
-          text: '',
-          tools: [],
+          blocks: [],
           thinking: '',
           notice: `API error: ${obj.error?.type ?? 'unknown'} — ${obj.error?.message ?? ''}`,
           raw: payload,
         }
       }
       if (Array.isArray(obj.content)) {
-        const text = obj.content
-          .filter((b) => b.type === 'text' && b.text)
-          .map((b) => b.text as string)
-          .join('')
-        const tools = obj.content.filter((b) => b.type === 'tool_use')
+        const blocks = obj.content.filter((b) => b.type === 'text' || b.type === 'tool_use')
         const thinking = obj.content
           .filter((b) => b.type === 'thinking')
           .map((b) => (b as { thinking?: string }).thinking ?? '')
           .join('')
-        return {
-          text,
-          tools,
-          thinking,
-          notice: 'Non-streaming JSON response.',
-          raw: payload,
-        }
+        return { blocks, thinking, notice: 'Non-streaming JSON response.', raw: payload }
       }
-      return { text: '', tools: [], thinking: '', notice: 'Unrecognized JSON response.', raw: payload }
+      return { blocks: [], thinking: '', notice: 'Unrecognized JSON response.', raw: payload }
     } catch (e) {
       return {
-        text: '',
-        tools: [],
+        blocks: [],
         thinking: '',
         notice: `Malformed JSON response: ${String(e)}`,
         raw: payload,
@@ -94,12 +79,10 @@ function parseResponse(payload: string | null): ParsedResponse {
     }
   }
 
-  // SSE response
-  let text = ''
+  const blocks: Block[] = []
   let thinking = ''
-  const tools: Block[] = []
-  const currentTool: { name?: string; input: string; id?: string } = { input: '' }
-  let inToolUse = false
+  let currentBlock: Block | null = null
+  let currentInputBuffer = ''
   let sawAnyEvent = false
 
   for (const rawLine of payload.split('\n')) {
@@ -114,58 +97,61 @@ function parseResponse(payload: string | null): ParsedResponse {
         content_block?: { type?: string; name?: string; id?: string }
       }
       sawAnyEvent = true
-      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-        inToolUse = true
-        currentTool.name = event.content_block.name
-        currentTool.id = event.content_block.id
-        currentTool.input = ''
+      if (event.type === 'content_block_start') {
+        const cb = event.content_block
+        if (cb?.type === 'text') {
+          currentBlock = { type: 'text', text: '' }
+          blocks.push(currentBlock)
+        } else if (cb?.type === 'tool_use') {
+          currentBlock = { type: 'tool_use', name: cb.name, id: cb.id, input: {} }
+          currentInputBuffer = ''
+          blocks.push(currentBlock)
+        } else {
+          currentBlock = null
+        }
       } else if (event.type === 'content_block_delta') {
-        if (event.delta?.type === 'text_delta' && event.delta.text) {
-          text += event.delta.text
-        } else if (event.delta?.type === 'input_json_delta' && event.delta.partial_json) {
-          currentTool.input += event.delta.partial_json
-        } else if (event.delta?.type === 'thinking_delta' && event.delta.thinking) {
-          thinking += event.delta.thinking
+        const d = event.delta
+        if (d?.type === 'text_delta' && d.text && currentBlock?.type === 'text') {
+          currentBlock.text = (currentBlock.text ?? '') + d.text
+        } else if (d?.type === 'input_json_delta' && d.partial_json) {
+          currentInputBuffer += d.partial_json
+        } else if (d?.type === 'thinking_delta' && d.thinking) {
+          thinking += d.thinking
         }
-      } else if (event.type === 'content_block_stop' && inToolUse) {
-        let parsed: unknown = currentTool.input
-        try {
-          parsed = JSON.parse(currentTool.input || '{}')
-        } catch {
-          // keep raw
+      } else if (event.type === 'content_block_stop') {
+        if (currentBlock?.type === 'tool_use') {
+          try {
+            currentBlock.input = JSON.parse(currentInputBuffer || '{}')
+          } catch {
+            currentBlock.input = currentInputBuffer
+          }
         }
-        tools.push({
-          type: 'tool_use',
-          name: currentTool.name,
-          id: currentTool.id,
-          input: parsed,
-        })
-        inToolUse = false
-        currentTool.input = ''
-        currentTool.name = undefined
-        currentTool.id = undefined
+        currentBlock = null
+        currentInputBuffer = ''
       }
     } catch {
       // ignore malformed SSE frames
     }
   }
 
+  const hasText = blocks.some((b) => b.type === 'text' && b.text)
+  const hasTool = blocks.some((b) => b.type === 'tool_use')
   let notice: string | null = null
   if (!sawAnyEvent) {
     notice = 'Response body is neither SSE nor JSON.'
-  } else if (!text && tools.length === 0 && thinking) {
+  } else if (!hasText && !hasTool && thinking) {
     notice = 'Response contained only a thinking block (no text or tool use).'
-  } else if (!text && tools.length === 0) {
+  } else if (!hasText && !hasTool) {
     notice = 'SSE stream had no text or tool use blocks.'
   }
 
-  return { text, tools, thinking, notice, raw: notice ? payload : null }
+  return { blocks, thinking, notice, raw: notice ? payload : null }
 }
 
-function ToolBlock({ label, body }: { label: string; body: string }) {
+function CollapsibleBlock({ label, body }: { label: string; body: string }) {
   const [open, setOpen] = useState(false)
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="mt-2">
+    <Collapsible open={open} onOpenChange={setOpen} className="my-2">
       <CollapsibleTrigger asChild>
         <Button variant="outline" size="sm" className="font-mono">
           {open ? '▾' : '▸'} {label}
@@ -180,10 +166,57 @@ function ToolBlock({ label, body }: { label: string; body: string }) {
   )
 }
 
+function ToolUseBlock({ toolUse, result }: { toolUse: Block; result?: Block }) {
+  const [open, setOpen] = useState(false)
+  const pending = !result
+  const resultContent = result
+    ? typeof result.content === 'string'
+      ? result.content
+      : JSON.stringify(result.content, null, 2)
+    : null
+  const inputJson =
+    typeof toolUse.input === 'string' ? toolUse.input : JSON.stringify(toolUse.input, null, 2)
+  const isError = !!(result && (result as { is_error?: boolean }).is_error)
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="my-2" data-tool-use-id={toolUse.id}>
+      <CollapsibleTrigger asChild>
+        <Button variant="outline" size="sm" className="font-mono gap-2">
+          <span>{open ? '▾' : '▸'}</span>
+          <span>{toolUse.name ?? 'tool'}</span>
+          {pending && <span className="text-xs text-muted-foreground">(pending)</span>}
+          {isError && <span className="text-xs text-destructive">(error)</span>}
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2 space-y-2">
+        <div>
+          <div className="text-xs font-semibold text-muted-foreground mb-1">Input</div>
+          <pre className="p-3 text-xs overflow-x-auto border rounded-md whitespace-pre-wrap">
+            {inputJson}
+          </pre>
+        </div>
+        <div>
+          <div className="text-xs font-semibold text-muted-foreground mb-1">Response</div>
+          {pending ? (
+            <div className="p-3 text-xs text-muted-foreground border rounded-md italic">
+              No response yet.
+            </div>
+          ) : (
+            <pre
+              className={`p-3 text-xs overflow-x-auto border rounded-md whitespace-pre-wrap ${
+                isError ? 'border-destructive/50' : ''
+              }`}
+            >
+              {resultContent}
+            </pre>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 function normalizeMathDelimiters(src: string): string {
-  // Convert LaTeX-style \(...\) and \[...\] to $...$ and $$...$$ for remark-math.
-  // Use placeholders to avoid interfering with escaped backslashes in code blocks
-  // is out of scope — assistant math typically isn't wrapped in code.
   return src
     .replace(/\\\[([\s\S]+?)\\\]/g, (_m, inner) => `$$${inner}$$`)
     .replace(/\\\(([\s\S]+?)\\\)/g, (_m, inner) => `$${inner}$`)
@@ -201,30 +234,25 @@ function MarkdownText({ children }: { children: string }) {
 
 type ViewMode = 'rendered' | 'plain' | 'raw'
 
-function renderBlock(block: Block, key: number, mode: ViewMode = 'plain') {
+function renderTextBlock(block: Block, key: number | string, mode: ViewMode) {
+  if (block.type !== 'text' || !block.text) return null
+  if (mode === 'rendered') {
+    return <MarkdownText key={key}>{block.text}</MarkdownText>
+  }
+  return (
+    <div key={key} className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+      {block.text}
+    </div>
+  )
+}
+
+function renderUserBlock(block: Block, key: number) {
   if (block.type === 'text' && block.text) {
-    if (mode === 'rendered') {
-      return <MarkdownText key={key}>{block.text}</MarkdownText>
-    }
     return (
       <div key={key} className="whitespace-pre-wrap break-words text-sm leading-relaxed">
         {block.text}
       </div>
     )
-  }
-  if (block.type === 'tool_use') {
-    return (
-      <ToolBlock
-        key={key}
-        label={`tool_use: ${block.name ?? 'unknown'}`}
-        body={JSON.stringify(block.input, null, 2)}
-      />
-    )
-  }
-  if (block.type === 'tool_result') {
-    const content =
-      typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2)
-    return <ToolBlock key={key} label="tool_result" body={content} />
   }
   return (
     <pre key={key} className="text-xs overflow-x-auto">
@@ -267,65 +295,83 @@ function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (m: View
   )
 }
 
-function TurnView({ turn }: { turn: Turn }) {
+function buildToolResultMap(turns: Turn[]): Map<string, Block> {
+  const map = new Map<string, Block>()
+  for (const turn of turns) {
+    const messages = (turn.request.payload?.messages ?? []) as unknown[]
+    for (const msg of messages) {
+      const blocks = blocksFromRequestMessage(msg)
+      for (const b of blocks) {
+        if (b.type === 'tool_result' && b.tool_use_id && !map.has(b.tool_use_id)) {
+          map.set(b.tool_use_id, b)
+        }
+      }
+    }
+  }
+  return map
+}
+
+function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, Block> }) {
   const [mode, setMode] = useState<ViewMode>('rendered')
   const messages = (turn.request.payload?.messages ?? []) as unknown[]
   const lastUser = messages[messages.length - 1]
   const userBlocks = blocksFromRequestMessage(lastUser)
+  const visibleUserBlocks = userBlocks.filter((b) => b.type !== 'tool_result')
+  const showUser = visibleUserBlocks.length > 0
   const parsed = parseResponse(turn.response?.payload ?? null)
-  const assistantBlocks: Block[] = [
-    ...(parsed.text ? [{ type: 'text', text: parsed.text } as Block] : []),
-    ...parsed.tools,
-  ]
-  const hasContent = assistantBlocks.length > 0
+  const hasAssistantContent = parsed.blocks.length > 0
 
   return (
     <div className="space-y-3">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">User · {formatTimestamp(turn.request.timestamp)}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {userBlocks.map((b, i) => renderBlock(b, i))}
-        </CardContent>
-      </Card>
+      {showUser && (
+        <div className="flex justify-end">
+          <Card className="max-w-[80%]">
+            <CardHeader>
+              <CardTitle className="text-sm">User · {formatTimestamp(turn.request.timestamp)}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {visibleUserBlocks.map((b, i) => renderUserBlock(b, i))}
+            </CardContent>
+          </Card>
+        </div>
+      )}
       {turn.response && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center justify-between gap-3">
-              <span>Assistant · {formatTimestamp(turn.response.timestamp)}</span>
-              <ViewModeToggle mode={mode} onChange={setMode} />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {mode === 'raw' ? (
-              <pre className="text-xs overflow-x-auto p-3 bg-muted rounded-md whitespace-pre-wrap break-words">
-                {turn.response.payload ?? '(empty response body)'}
-              </pre>
-            ) : (
-              <>
-                {assistantBlocks.map((b, i) => renderBlock(b, i, mode))}
-                {parsed.thinking && (
-                  <ToolBlock label="thinking" body={parsed.thinking} />
-                )}
-                {parsed.notice && !hasContent && (
-                  <div className="rounded-md border border-destructive/50 bg-destructive/5 text-destructive px-3 py-2 text-sm">
-                    <div className="font-medium">No renderable content</div>
-                    <div className="text-xs mt-1">{parsed.notice}</div>
-                  </div>
-                )}
-                {parsed.raw && !hasContent && (
-                  <ToolBlock label="raw response body" body={parsed.raw} />
-                )}
-              </>
-            )}
-            <div className="text-xs text-muted-foreground pt-2">
-              {fmtNum(turn.response.input_tokens)} in · {fmtNum(turn.response.output_tokens)} out
-              {turn.response.cache_read_input_tokens != null &&
-                ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache`}
+        <div className="space-y-2 max-w-[80%] mr-auto">
+          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>Assistant · {formatTimestamp(turn.response.timestamp)}</span>
+            <ViewModeToggle mode={mode} onChange={setMode} />
+          </div>
+          {mode === 'raw' ? (
+            <pre className="text-xs overflow-x-auto p-3 bg-muted rounded-md whitespace-pre-wrap break-words">
+              {turn.response.payload ?? '(empty response body)'}
+            </pre>
+          ) : (
+            <div className="space-y-2">
+              {parsed.blocks.map((b, i) => {
+                if (b.type === 'tool_use') {
+                  const result = b.id ? toolResults.get(b.id) : undefined
+                  return <ToolUseBlock key={b.id ?? `tu-${i}`} toolUse={b} result={result} />
+                }
+                return renderTextBlock(b, i, mode)
+              })}
+              {parsed.thinking && <CollapsibleBlock label="thinking" body={parsed.thinking} />}
+              {parsed.notice && !hasAssistantContent && (
+                <div className="rounded-md border border-destructive/50 bg-destructive/5 text-destructive px-3 py-2 text-sm">
+                  <div className="font-medium">No renderable content</div>
+                  <div className="text-xs mt-1">{parsed.notice}</div>
+                </div>
+              )}
+              {parsed.raw && !hasAssistantContent && (
+                <CollapsibleBlock label="raw response body" body={parsed.raw} />
+              )}
             </div>
-          </CardContent>
-        </Card>
+          )}
+          <div className="text-xs text-muted-foreground">
+            {fmtNum(turn.response.input_tokens)} in · {fmtNum(turn.response.output_tokens)} out
+            {turn.response.cache_read_input_tokens != null &&
+              ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache`}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -341,6 +387,11 @@ export default function Session() {
     api.session(sessionId).then(setDetail).catch((e) => setError(String(e)))
   }, [sessionId])
 
+  const toolResults = useMemo(
+    () => (detail ? buildToolResultMap(detail.turns) : new Map<string, Block>()),
+    [detail],
+  )
+
   if (error) return <div className="text-destructive">Error: {error}</div>
   if (!detail) return <div className="text-muted-foreground">Loading…</div>
 
@@ -355,7 +406,7 @@ export default function Session() {
       </div>
       <div className="space-y-6">
         {detail.turns.map((t) => (
-          <TurnView key={t.request.id} turn={t} />
+          <TurnView key={t.request.id} turn={t} toolResults={toolResults} />
         ))}
       </div>
     </div>
