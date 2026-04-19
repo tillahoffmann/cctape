@@ -5,12 +5,12 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
+import { scaleTime } from 'd3-scale'
 import { api, type UsageRecord } from '../lib/api'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface Point {
@@ -39,10 +39,23 @@ export default function Usage() {
     unified_7d_utilization: r.unified_7d_utilization,
   }))
 
+  const tMin = data.length ? Math.min(...data.map((d) => d.t)) : 0
+  const tMax = data.length ? Math.max(...data.map((d) => d.t)) : 0
+  const tickDates = data.length
+    ? scaleTime().domain([tMin, tMax]).ticks(7)
+    : []
+  const ticks = tickDates.map((d) => d.getTime())
+  const allOnDateBoundary = tickDates.every(
+    (d) =>
+      d.getHours() === 0 &&
+      d.getMinutes() === 0 &&
+      d.getSeconds() === 0 &&
+      d.getMilliseconds() === 0,
+  )
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Utilization</CardTitle>
         <Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))}>
           <TabsList>
             {RANGES.map((d) => (
@@ -66,22 +79,24 @@ export default function Usage() {
                 <XAxis
                   dataKey="t"
                   type="number"
-                  domain={['dataMin', 'dataMax']}
+                  domain={[tMin, tMax]}
                   scale="time"
-                  tickFormatter={(v) => new Date(v).toLocaleDateString()}
+                  ticks={ticks}
+                  tickFormatter={(v) => {
+                    const d = new Date(v)
+                    return allOnDateBoundary
+                      ? d.toLocaleDateString()
+                      : `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                  }}
                 />
                 <YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
-                <Tooltip
-                  labelFormatter={(v) => new Date(v as number).toLocaleString()}
-                  formatter={(value) => `${(Number(value) * 100).toFixed(1)}%`}
-                />
                 <Legend />
                 <Line
                   type="monotone"
                   dataKey="unified_5h_utilization"
                   name="5h"
                   stroke="var(--color-chart-1)"
-                  dot={false}
+                  dot={true}
                   isAnimationActive={false}
                 />
                 <Line
@@ -89,7 +104,7 @@ export default function Usage() {
                   dataKey="unified_7d_utilization"
                   name="7d"
                   stroke="var(--color-chart-2)"
-                  dot={false}
+                  dot={true}
                   isAnimationActive={false}
                 />
               </LineChart>

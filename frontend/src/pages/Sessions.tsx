@@ -39,7 +39,6 @@ export default function Sessions() {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-4">Sessions</h2>
       <Table>
         <TableHeader>
           <TableRow>
