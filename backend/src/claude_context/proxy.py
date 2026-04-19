@@ -1,3 +1,4 @@
+import bz2
 import json
 import sqlite3
 from datetime import UTC, datetime
@@ -7,9 +8,9 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from httpx_sse._decoders import SSEDecoder
-from zstandard import compress
 
 from .sessions import ensure_known as ensure_session_known
+from .storage import decompose_payload
 
 ANTHROPIC_BASE_URL = "https://api.anthropic.com/"
 # Headers that describe a single connection hop, not the end-to-end request
@@ -38,18 +39,35 @@ router = APIRouter(prefix="/proxy")
 
 @router.post("/v1/messages")
 async def _post_messages(request: Request):
-    # Save the complete request entry.
+    # Save the complete request entry. The body is decomposed into dedup columns
+    # (system, tools, individual messages are interned in the `blobs` table) so
+    # identical content shared across requests is stored once. Only if the body
+    # fails to parse do we fall back to the legacy single-blob `payload` column.
     conn: sqlite3.Connection = request.app.state.conn
+    request_body = await request.body()
     values = {
-        "headers": compress(json.dumps(request.headers.items()).encode()),
+        "headers": bz2.compress(json.dumps(request.headers.items()).encode()),
         "timestamp": datetime.now(UTC).isoformat(),
-        "payload": compress(await request.body()),
         "session_id": request.headers.get("x-claude-code-session-id"),
+        "system_hash": None,
+        "tools_hash": None,
+        "message_hashes": None,
+        "extras": None,
+        "payload": None,
     }
+    try:
+        values.update(decompose_payload(conn, request_body))
+    except (ValueError, TypeError):
+        values["payload"] = bz2.compress(request_body)
     cursor = conn.execute(
         """
-        INSERT INTO requests (timestamp, headers, payload, session_id)
-        VALUES (:timestamp, :headers, :payload, :session_id)
+        INSERT INTO requests (
+            timestamp, headers, session_id,
+            system_hash, tools_hash, message_hashes, extras, payload
+        ) VALUES (
+            :timestamp, :headers, :session_id,
+            :system_hash, :tools_hash, :message_hashes, :extras, :payload
+        )
         """,
         values,
     )
@@ -108,10 +126,10 @@ async def _post_messages(request: Request):
             values = {
                 "status_code": upstream.status_code,
                 "timestamp": timestamp,
-                "headers": compress(
+                "headers": bz2.compress(
                     json.dumps(list(upstream.headers.items())).encode()
                 ),
-                "payload": compress(payload),
+                "payload": bz2.compress(payload),
                 "request_row_id": request_row_id,
                 "unified_5h_utilization": float(
                     upstream.headers["anthropic-ratelimit-unified-5h-utilization"]

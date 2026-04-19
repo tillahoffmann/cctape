@@ -1,3 +1,4 @@
+import bz2
 import gzip
 import os
 import sqlite3
@@ -9,7 +10,6 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
-from zstandard import decompress
 
 from claude_context import create_app
 
@@ -60,13 +60,35 @@ def test_post_message(
     mock_send.assert_called_once()
 
     with closing(sqlite3.connect(claude_context_db)) as conn:
-        (request_row_id, session_id) = conn.execute(
-            "SELECT id, session_id FROM requests"
+        (
+            request_row_id,
+            session_id,
+            system_hash,
+            tools_hash,
+            message_hashes,
+            legacy_payload,
+        ) = conn.execute(
+            "SELECT id, session_id, system_hash, tools_hash, message_hashes, payload FROM requests"
         ).fetchone()
         assert session_id == "testing-session-1234"
+        # Parseable bodies take the dedup path: legacy payload column stays NULL,
+        # and every referenced hash exists in `blobs`.
+        assert legacy_payload is None
+        assert isinstance(system_hash, bytes) and len(system_hash) == 32
+        assert isinstance(tools_hash, bytes) and len(tools_hash) == 32
+        # `message_hashes` is a BLOB of concatenated 32-byte digests.
+        assert isinstance(message_hashes, bytes)
+        assert len(message_hashes) > 0 and len(message_hashes) % 32 == 0
+        hashes = [message_hashes[i : i + 32] for i in range(0, len(message_hashes), 32)]
+        for digest in [system_hash, tools_hash, *hashes]:
+            assert (
+                conn.execute("SELECT 1 FROM blobs WHERE hash = ?", (digest,)).fetchone()
+                is not None
+            )
+
         referenced_row_id, output_tokens, payload = conn.execute(
             "SELECT request_row_id, output_tokens, payload FROM responses"
         ).fetchone()
         assert request_row_id == referenced_row_id
         assert output_tokens == 21
-        assert b"is there something" in decompress(payload)
+        assert b"is there something" in bz2.decompress(payload)

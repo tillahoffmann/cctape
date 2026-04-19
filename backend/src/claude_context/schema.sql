@@ -1,19 +1,36 @@
+CREATE TABLE blobs (
+    "hash" BLOB PRIMARY KEY,       -- raw 32-byte sha256 digest
+    "data" BLOB NOT NULL            -- bz2-compressed canonical JSON
+);
+
 CREATE TABLE requests (
     "id" INTEGER PRIMARY KEY,
     "timestamp" DATETIME NOT NULL,
-    "headers" BLOB NOT NULL,
-    "payload" BLOB NOT NULL,
+    "headers" BLOB NOT NULL,        -- bz2-compressed JSON
 
     -- The session id is present in the header, but this facilitates easy grouping.
-    "session_id" TEXT
+    "session_id" TEXT,
+
+    -- Deduplicated payload components. `system` and `tools` are each stored as a
+    -- single blob; `message_hashes` is the concatenation of 32-byte digests in
+    -- message order. `extras` is a bz2-compressed JSON object holding any other
+    -- top-level request fields (model, max_tokens, thinking, etc.).
+    "system_hash" BLOB REFERENCES blobs(hash),
+    "tools_hash" BLOB REFERENCES blobs(hash),
+    "message_hashes" BLOB,
+    "extras" BLOB,
+
+    -- Fallback for bodies that could not be parsed as JSON. Set only when the
+    -- deduplicated columns above are unusable; NULL for normal requests.
+    "payload" BLOB
 );
 CREATE INDEX requests_session_id ON requests(session_id);
 
 CREATE TABLE responses (
     "status_code" INTEGER NOT NULL,
     "timestamp" DATETIME NOT NULL,
-    "headers" BLOB NOT NULL,
-    "payload" BLOB NOT NULL,
+    "headers" BLOB NOT NULL,        -- bz2-compressed JSON
+    "payload" BLOB NOT NULL,        -- bz2-compressed response body
     -- Foreign key reference that tells us which message this is a response to. This is
     -- NOT the request id that Anthropic returns in the header.
     "request_row_id" INTEGER NOT NULL REFERENCES requests(id),

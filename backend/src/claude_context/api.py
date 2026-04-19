@@ -1,23 +1,13 @@
-import json
+import bz2
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from zstandard import ZstdDecompressor
 
+from .storage import first_message, reconstruct_payload
 from .util import iter_records
-
-
-def _maybe_decompress(payload: bytes) -> bytes:
-    # Compression of fields has changed over time. We try to decompress based on the
-    # header.
-    _ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
-    if payload.startswith(_ZSTD_MAGIC):
-        return ZstdDecompressor().decompress(payload)
-    return payload
-
 
 router = APIRouter(prefix="/api")
 
@@ -105,15 +95,15 @@ async def _get_usage(request: Request, days: int = 7) -> list[UsageRecord]:
     )
 
 
-def _extract_preview(payload: bytes, limit: int = 200) -> str | None:
-    try:
-        data = json.loads(_maybe_decompress(payload))
-    except (ValueError, TypeError):
+def _extract_preview(
+    conn: sqlite3.Connection,
+    message_hashes: bytes | None,
+    payload: bytes | None,
+    limit: int = 200,
+) -> str | None:
+    first = first_message(conn, message_hashes, payload)
+    if not isinstance(first, dict):
         return None
-    messages = data.get("messages") if isinstance(data, dict) else None
-    if not messages:
-        return None
-    first = messages[0]
     content = first.get("content")
     text: str | None = None
     if isinstance(content, str):
@@ -163,13 +153,15 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
         """
     ).fetchall()
 
-    # Fetch the earliest request payload per session for preview text.
+    # Fetch the earliest request per session for preview text. Prefer the dedup
+    # columns; fall back to `payload` for legacy rows whose body failed to parse.
     preview_rows = conn.execute(
         """
-        SELECT session_id, payload
+        SELECT session_id, message_hashes, payload
         FROM (
             SELECT
                 session_id,
+                message_hashes,
                 payload,
                 ROW_NUMBER() OVER (
                     PARTITION BY session_id ORDER BY timestamp ASC
@@ -181,7 +173,8 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
         """
     ).fetchall()
     previews: dict[str, str | None] = {
-        session_id: _extract_preview(payload) for session_id, payload in preview_rows
+        session_id: _extract_preview(conn, message_hashes, payload)
+        for session_id, message_hashes, payload in preview_rows
     }
 
     # SQLite's MIN/MAX on a TEXT-stored datetime returns a string; convert.
@@ -233,6 +226,10 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
         SELECT
             r.id AS request_id,
             r.timestamp AS request_timestamp,
+            r.system_hash AS system_hash,
+            r.tools_hash AS tools_hash,
+            r.message_hashes AS message_hashes,
+            r.extras AS extras,
             r.payload AS request_payload,
             resp.status_code AS status_code,
             resp.timestamp AS response_timestamp,
@@ -260,12 +257,15 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
         meta if meta else (None, None, None, None)
     )
 
-    decompressor = ZstdDecompressor()
     turns: list[Turn] = []
     for row in rows:
         (
             request_id,
             request_timestamp,
+            system_hash,
+            tools_hash,
+            message_hashes,
+            extras,
             request_payload,
             status_code,
             response_timestamp,
@@ -277,12 +277,15 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
         ) = row
 
         try:
-            parsed_request = (
-                json.loads(_maybe_decompress(request_payload))
-                if request_payload
-                else None
+            parsed_request = reconstruct_payload(
+                conn,
+                system_hash,
+                tools_hash,
+                message_hashes,
+                extras,
+                request_payload,
             )
-        except ValueError:
+        except (ValueError, KeyError):
             parsed_request = None
 
         response: ResponseRecord | None = None
@@ -290,7 +293,7 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             decoded_payload: str | None = None
             if response_payload:
                 try:
-                    decoded_payload = decompressor.decompress(response_payload).decode(
+                    decoded_payload = bz2.decompress(response_payload).decode(
                         "utf-8", errors="replace"
                     )
                 except Exception:

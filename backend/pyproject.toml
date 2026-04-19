@@ -8,7 +8,6 @@ dependencies = [
     "fastapi>=0.136.0",
     "httpx>=0.28.1",
     "httpx-sse>=0.4.3",
-    "zstandard>=0.25.0",
 ]
 
 [dependency-groups]
