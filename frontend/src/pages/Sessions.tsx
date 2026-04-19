@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type SessionSummary } from '../lib/api'
+import { formatTimestamp } from '../lib/time'
 import {
   Table,
   TableBody,
@@ -9,10 +10,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
 
 function formatTokens(n: number | null): string {
   if (n == null) return '—'
@@ -58,8 +55,8 @@ export default function Sessions() {
                   {s.session_id.slice(0, 8)}…
                 </Link>
               </TableCell>
-              <TableCell>{formatDate(s.first_timestamp)}</TableCell>
-              <TableCell>{formatDate(s.last_timestamp)}</TableCell>
+              <TableCell>{formatTimestamp(s.first_timestamp)}</TableCell>
+              <TableCell>{formatTimestamp(s.last_timestamp)}</TableCell>
               <TableCell className="text-right tabular-nums">{s.turn_count}</TableCell>
               <TableCell className="text-right tabular-nums">{formatTokens(s.input_tokens)}</TableCell>
               <TableCell className="text-right tabular-nums">{formatTokens(s.output_tokens)}</TableCell>

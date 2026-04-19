@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { api, type SessionDetail, type Turn } from '../lib/api'
+import { formatTimestamp } from '../lib/time'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Collapsible,
@@ -252,10 +253,6 @@ function renderUserBlock(block: Block, key: number) {
       {JSON.stringify(block, null, 2)}
     </pre>
   )
-}
-
-function formatTimestamp(iso: string): string {
-  return new Date(iso).toLocaleString()
 }
 
 function fmtNum(n: number | null | undefined): string {
