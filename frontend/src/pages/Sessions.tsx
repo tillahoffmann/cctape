@@ -46,7 +46,7 @@ export default function Sessions() {
             <TableHead>Session</TableHead>
             <TableHead>Project</TableHead>
             <TableHead>Branch</TableHead>
-            <TableHead>Last</TableHead>
+            <TableHead>Updated</TableHead>
             <TableHead className="text-right">Turns</TableHead>
             <TableHead className="text-right">In</TableHead>
             <TableHead className="text-right">Out</TableHead>
