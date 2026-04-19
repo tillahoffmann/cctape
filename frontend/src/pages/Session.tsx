@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { api, type SessionDetail, type Turn } from '../lib/api'
-import { formatTimestamp } from '../lib/time'
+import { LiveTimestamp } from '../lib/LiveTimestamp'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Collapsible,
@@ -316,7 +316,7 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
         <div className="flex justify-end">
           <div className="max-w-[80%] space-y-2">
             <div className="text-xs text-muted-foreground">
-              {formatTimestamp(turn.request.timestamp)}
+              <LiveTimestamp iso={turn.request.timestamp} />
             </div>
             <Card>
               <CardContent className="space-y-2">
@@ -329,7 +329,7 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
       {turn.response && (
         <div className="space-y-2 max-w-[80%] mr-auto">
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span>{formatTimestamp(turn.response.timestamp)}</span>
+            <span><LiveTimestamp iso={turn.response.timestamp} /></span>
             <ViewModeToggle mode={mode} onChange={setMode} />
           </div>
           {mode === 'raw' ? (
@@ -444,7 +444,7 @@ export default function Session() {
             {detail.cwd && <span className="font-mono">{detail.cwd}</span>}
             {detail.git_branch && <span className="font-mono">branch: {detail.git_branch}</span>}
             {detail.is_sidechain && <span>sidechain</span>}
-            {detail.started_at && <span>started {formatTimestamp(detail.started_at)}</span>}
+            {detail.started_at && <span>started <LiveTimestamp iso={detail.started_at} /></span>}
           </div>
         )}
       </div>

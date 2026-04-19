@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type SessionSummary } from '../lib/api'
-import { formatTimestamp } from '../lib/time'
+import { LiveTimestamp } from '../lib/LiveTimestamp'
 import {
   Table,
   TableBody,
@@ -67,7 +67,7 @@ export default function Sessions() {
               <TableCell className="font-mono text-xs">
                 {s.git_branch ?? '—'}
               </TableCell>
-              <TableCell>{formatTimestamp(s.last_timestamp)}</TableCell>
+              <TableCell><LiveTimestamp iso={s.last_timestamp} /></TableCell>
               <TableCell className="text-right tabular-nums">{s.turn_count}</TableCell>
               <TableCell className="text-right tabular-nums">{formatTokens(s.input_tokens)}</TableCell>
               <TableCell className="text-right tabular-nums">{formatTokens(s.output_tokens)}</TableCell>
