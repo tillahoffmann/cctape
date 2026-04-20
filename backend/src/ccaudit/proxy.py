@@ -145,8 +145,11 @@ async def _post_messages(request: Request):
             usage = {}
             title_text = ""
             decoder = SSEDecoder()
-            for line in text.splitlines():
-                event = decoder.decode(line)
+            # SSEDecoder dispatches a completed event only when fed the blank
+            # line separator between events. str.splitlines() drops those
+            # blanks, so events never fire — use split("\n") to preserve them.
+            for line in text.split("\n"):
+                event = decoder.decode(line.rstrip("\r"))
                 if not event:
                     continue
                 if event.event == "message_delta":
