@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from typing import Any
 
@@ -39,8 +40,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS blob_fts USING fts5(
             text,
-            hash UNINDEXED,
+            content='',
             tokenize = "unicode61 tokenchars '_'"
+        );
+        CREATE TABLE IF NOT EXISTS fts_hash (
+            "rowid" INTEGER PRIMARY KEY,
+            "hash" BLOB NOT NULL UNIQUE
         );
         CREATE TABLE IF NOT EXISTS session_blobs (
             "session_id" TEXT NOT NULL,
@@ -111,19 +116,20 @@ def index_blob(conn: sqlite3.Connection, digest: bytes, data: bytes) -> None:
 
     No-op if the hash is already indexed (idempotent). Errors are logged and
     swallowed so callers on the hot path can't be broken by indexing bugs.
+
+    Contentless FTS can't store the hash itself, so we allocate a rowid via
+    fts_hash (which dedupes on `hash`) and use that same rowid in blob_fts.
     """
     try:
-        existing = conn.execute(
-            "SELECT 1 FROM blob_fts WHERE hash = ? LIMIT 1", (digest,)
-        ).fetchone()
-        if existing:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO fts_hash (hash) VALUES (?)", (digest,)
+        )
+        if cur.rowcount == 0:
+            # Already indexed.
             return
-        text = extract_blob_text(data)
-        if not text:
-            # Still insert an empty row so we don't re-scan this blob on every
-            # ingest — hash presence is our "already processed" marker.
-            text = ""
-        conn.execute("INSERT INTO blob_fts (text, hash) VALUES (?, ?)", (text, digest))
+        rowid = cur.lastrowid
+        text = extract_blob_text(data) or ""
+        conn.execute("INSERT INTO blob_fts (rowid, text) VALUES (?, ?)", (rowid, text))
     except Exception:
         logger.exception("failed to index blob %s", digest.hex() if digest else "?")
 
@@ -176,7 +182,7 @@ def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
     for digest, data in conn.execute(
         """
         SELECT b.hash, b.data FROM blobs b
-        WHERE NOT EXISTS (SELECT 1 FROM blob_fts f WHERE f.hash = b.hash)
+        WHERE NOT EXISTS (SELECT 1 FROM fts_hash fh WHERE fh.hash = b.hash)
         """
     ).fetchall():
         index_blob(conn, digest, data)
@@ -227,41 +233,76 @@ def _to_fts_query(query: str) -> str:
     return " ".join(tokens)
 
 
+_SNIPPET_CONTEXT_CHARS = 60
+
+
+def _build_snippet(text: str, terms: list[str]) -> str:
+    """Extract a short highlighted snippet around the first match of any term.
+
+    Replaces FTS5's snippet() for contentless indexes: finds the earliest
+    case-insensitive hit of any query term, takes a ±60-char window, and
+    wraps every matching occurrence with <mark>...</mark>. Token-boundary
+    behaviour differs from FTS5's tokenizer-aware snippet but the output is
+    close enough for UI display.
+    """
+    if not text or not terms:
+        return ""
+    low = text.lower()
+    first = min((i for i in (low.find(t.lower()) for t in terms) if i >= 0), default=-1)
+    if first < 0:
+        return ""
+    start = max(0, first - _SNIPPET_CONTEXT_CHARS)
+    end = min(len(text), first + _SNIPPET_CONTEXT_CHARS)
+    window = text[start:end]
+    for term in terms:
+        window = re.sub(
+            re.escape(term),
+            lambda m: f"<mark>{m.group(0)}</mark>",
+            window,
+            flags=re.IGNORECASE,
+        )
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return prefix + window + suffix
+
+
 def search_sessions(
     conn: sqlite3.Connection, query: str, limit: int = 50
 ) -> list[dict[str, Any]]:
     """Search indexed text and return sessions grouped by best-matching blob.
 
     Results are ordered by bm25 rank of the top matching blob per session.
-    Each row includes a snippet of matched text for result display.
+    Snippets are rebuilt in Python by re-extracting text from the matching
+    blob — contentless FTS doesn't store the text column.
     """
     fts_query = _to_fts_query(query)
     if not fts_query:
         return []
-    # snippet(): col 0, 10-token context, <mark> tags, "…" ellipsis.
+    # Contentless FTS cannot return UNINDEXED columns, so we join its rowid
+    # to fts_hash to recover the blob digest.
     rows = conn.execute(
         """
         WITH hits AS (
-            SELECT
-                f.hash AS hash,
-                snippet(blob_fts, 0, '<mark>', '</mark>', '…', 10) AS snippet,
-                bm25(blob_fts) AS rank
+            SELECT f.rowid AS rid, bm25(blob_fts) AS rank
             FROM blob_fts f
             WHERE blob_fts MATCH :query
+        ),
+        hit_hashes AS (
+            SELECT fh.hash AS hash, h.rank AS rank
+            FROM hits h JOIN fts_hash fh ON fh.rowid = h.rid
         ),
         session_hits AS (
             SELECT
                 sb.session_id AS session_id,
-                h.hash AS hash,
-                h.snippet AS snippet,
-                h.rank AS rank,
+                hh.hash AS hash,
+                hh.rank AS rank,
                 ROW_NUMBER() OVER (
-                    PARTITION BY sb.session_id ORDER BY h.rank ASC
+                    PARTITION BY sb.session_id ORDER BY hh.rank ASC
                 ) AS rn
-            FROM hits h
-            JOIN session_blobs sb ON sb.hash = h.hash
+            FROM hit_hashes hh
+            JOIN session_blobs sb ON sb.hash = hh.hash
         )
-        SELECT sh.session_id, sh.snippet, sh.rank, s.title, s.cwd, s.git_branch
+        SELECT sh.session_id, sh.hash, sh.rank, s.title, s.cwd, s.git_branch
         FROM session_hits sh
         LEFT JOIN sessions s ON s.session_id = sh.session_id
         WHERE sh.rn = 1
@@ -270,14 +311,22 @@ def search_sessions(
         """,
         {"query": fts_query, "limit": limit},
     ).fetchall()
-    return [
-        {
-            "session_id": session_id,
-            "snippet": snippet,
-            "rank": rank,
-            "title": title,
-            "cwd": cwd,
-            "git_branch": git_branch,
-        }
-        for session_id, snippet, rank, title, cwd, git_branch in rows
-    ]
+
+    terms = [w for w in query.split() if w]
+    results = []
+    for session_id, digest, rank, title, cwd, git_branch in rows:
+        blob_row = conn.execute(
+            "SELECT data FROM blobs WHERE hash = ?", (digest,)
+        ).fetchone()
+        snippet_text = extract_blob_text(blob_row[0]) if blob_row else ""
+        results.append(
+            {
+                "session_id": session_id,
+                "snippet": _build_snippet(snippet_text, terms),
+                "rank": rank,
+                "title": title,
+                "cwd": cwd,
+                "git_branch": git_branch,
+            }
+        )
+    return results

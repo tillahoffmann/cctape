@@ -62,10 +62,21 @@ CREATE TABLE sessions (
 -- Full-text search over extracted plain text from blobs (message content,
 -- tool inputs/results, thinking). Indexed text is capped per blob to keep
 -- the index compact; see fts.py:TEXT_CAP.
+-- content='' makes this a contentless FTS5 index — only the inverted index is
+-- stored, not the text itself. Search is faster and the table is ~14 MB
+-- smaller on a typical DB. Snippets are rebuilt in Python at query time by
+-- re-extracting text from the referenced blob.
 CREATE VIRTUAL TABLE blob_fts USING fts5(
     text,
-    hash UNINDEXED,
+    content='',
     tokenize = "unicode61 tokenchars '_'"
+);
+-- Maps blob_fts rowids back to blob hashes. Contentless FTS can't return
+-- UNINDEXED column values, so the hash lives in this side table and is
+-- joined on rowid at query time.
+CREATE TABLE fts_hash (
+    "rowid" INTEGER PRIMARY KEY,
+    "hash" BLOB NOT NULL UNIQUE
 );
 
 -- Maps each FTS-indexed blob to the sessions it appears in. Deduplicated to
