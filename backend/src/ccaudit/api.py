@@ -1,5 +1,6 @@
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -86,6 +87,26 @@ class SearchHit(BaseModel):
     title: str | None
     cwd: str | None
     git_branch: str | None
+
+
+class Config(BaseModel):
+    version: str | None
+    db_path: str
+    anthropic_base_url: str
+
+
+@router.get("/config")
+async def _get_config(request: Request) -> Config:
+    try:
+        pkg_version: str | None = version("ccaudit")
+    except PackageNotFoundError:
+        pkg_version = None
+    base_url = str(request.base_url).rstrip("/") + "/proxy"
+    return Config(
+        version=pkg_version,
+        db_path=request.app.state.db_path,
+        anthropic_base_url=base_url,
+    )
 
 
 @router.get("/search")

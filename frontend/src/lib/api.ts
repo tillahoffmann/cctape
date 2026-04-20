@@ -87,7 +87,14 @@ export interface SearchHit {
   git_branch: string | null
 }
 
+export interface Config {
+  version: string | null
+  db_path: string
+  anthropic_base_url: string
+}
+
 export const api = {
+  config: () => getJSON<Config>('/api/config'),
   sessions: () => getJSON<SessionSummary[]>('/api/sessions'),
   session: (id: string) => getJSON<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
   usage: (days = 7) => getJSON<UsageRecord[]>(`/api/usage?days=${days}`),

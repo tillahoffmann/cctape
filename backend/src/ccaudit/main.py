@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
         with closing(sqlite3.connect(database)) as conn:
             app.state.http_client = client
             app.state.conn = conn
+            app.state.db_path = str(database)
 
             conn.execute("PRAGMA foreign_keys = ON")
             if not db_exists:

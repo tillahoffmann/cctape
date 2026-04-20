@@ -2,6 +2,7 @@ import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import Sessions from './pages/Sessions'
 import Session from './pages/Session'
 import Usage from './pages/Usage'
+import Settings from './pages/Settings'
 import { Button } from '@/components/ui/button'
 import { HeaderSlotProvider } from './lib/HeaderSlot'
 import { useHeaderSlotValue } from './lib/headerSlotContext'
@@ -35,6 +36,7 @@ function Header() {
           <nav className="flex items-center gap-1">
             <NavItem to="/sessions">Sessions</NavItem>
             <NavItem to="/usage">Usage</NavItem>
+            <NavItem to="/settings">Settings</NavItem>
           </nav>
         )}
       </div>
@@ -53,6 +55,7 @@ export default function App() {
             <Route path="/sessions" element={<Sessions />} />
             <Route path="/sessions/:sessionId" element={<Session />} />
             <Route path="/usage" element={<Usage />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<div className="text-muted-foreground">Not found.</div>} />
           </Routes>
         </main>
