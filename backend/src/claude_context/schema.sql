@@ -58,3 +58,22 @@ CREATE TABLE sessions (
     "is_sidechain" INTEGER,
     "title" TEXT
 );
+
+-- Full-text search over extracted plain text from blobs (message content,
+-- tool inputs/results, thinking). Indexed text is capped per blob to keep
+-- the index compact; see fts.py:TEXT_CAP.
+CREATE VIRTUAL TABLE blob_fts USING fts5(
+    text,
+    hash UNINDEXED,
+    tokenize = "unicode61 tokenchars '_'"
+);
+
+-- Maps each FTS-indexed blob to the sessions it appears in. Deduplicated to
+-- one row per (session_id, hash) pair to avoid the quadratic blow-up from
+-- per-turn conversation replay in the Anthropic API.
+CREATE TABLE session_blobs (
+    "session_id" TEXT NOT NULL,
+    "hash" BLOB NOT NULL,
+    PRIMARY KEY (session_id, hash)
+);
+CREATE INDEX session_blobs_hash ON session_blobs(hash);

@@ -9,6 +9,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
+from .fts import backfill as fts_backfill
+from .fts import ensure_schema as fts_ensure_schema
 from .proxy import router as proxy_router
 from .sessions import sync_all as sync_sessions
 
@@ -49,6 +51,16 @@ async def lifespan(app: FastAPI):
             if not db_exists:
                 schema_path = Path(__file__).parent / "schema.sql"
                 conn.executescript(schema_path.read_text())
+            # Idempotent: creates FTS tables on pre-existing databases and
+            # indexes any blobs not yet covered. Wrapped so a failure here
+            # cannot prevent the proxy from coming up.
+            try:
+                fts_ensure_schema(conn)
+                fts_backfill(conn)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception("FTS setup failed")
             sync_sessions(conn)
             yield
 

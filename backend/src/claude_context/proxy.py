@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from httpx_sse._decoders import SSEDecoder
 
+from .fts import index_request_blobs
 from .sessions import ensure_known as ensure_session_known
 from .storage import decompose_payload
 
@@ -105,6 +106,18 @@ async def _post_messages(request: Request):
 
     session_id = values["session_id"]
     ensure_session_known(conn, session_id)
+
+    # Index extracted text from this request's blobs for full-text search.
+    # index_request_blobs swallows its own errors so a bug here cannot break
+    # the proxy; at worst new rows remain unsearchable until next startup.
+    index_request_blobs(
+        conn,
+        session_id,
+        values["system_hash"],
+        values["tools_hash"],
+        values["message_hashes"],
+    )
+    conn.commit()
 
     # Send the request, excluding headers that should not be proxied.
     client: httpx.AsyncClient = request.app.state.http_client

@@ -67,8 +67,19 @@ async function getJSON<T>(url: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+export interface SearchHit {
+  session_id: string
+  snippet: string
+  rank: number
+  title: string | null
+  cwd: string | null
+  git_branch: string | null
+}
+
 export const api = {
   sessions: () => getJSON<SessionSummary[]>('/api/sessions'),
   session: (id: string) => getJSON<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
   usage: (days = 7) => getJSON<UsageRecord[]>(`/api/usage?days=${days}`),
+  search: (q: string, limit = 50) =>
+    getJSON<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 }

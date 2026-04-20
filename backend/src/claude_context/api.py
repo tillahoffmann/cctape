@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from .fts import search_sessions
 from .storage import first_message, reconstruct_payload
 from .util import iter_records
 
@@ -72,6 +73,27 @@ class SessionDetail(BaseModel):
     git_branch: str | None
     is_sidechain: bool | None
     started_at: datetime | None
+
+
+class SearchHit(BaseModel):
+    session_id: str
+    snippet: str
+    rank: float
+    title: str | None
+    cwd: str | None
+    git_branch: str | None
+
+
+@router.get("/search")
+async def _search(request: Request, q: str, limit: int = 50) -> list[SearchHit]:
+    conn: sqlite3.Connection = request.app.state.conn
+    try:
+        results = search_sessions(conn, q, limit=limit)
+    except sqlite3.OperationalError as exc:
+        # FTS5 raises OperationalError on malformed MATCH expressions (e.g.
+        # unbalanced quotes). Surface as 400 rather than 500.
+        raise HTTPException(status_code=400, detail=f"invalid search: {exc}") from exc
+    return [SearchHit(**row) for row in results]
 
 
 @router.get("/usage")
