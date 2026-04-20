@@ -159,7 +159,10 @@ async def _post_messages(request: Request):
                     if delta.get("type") == "text_delta":
                         title_text += delta.get("text", "")
 
-            # Persist the generated title against the session row.
+            # Persist the generated title against the session row. The session
+            # row may not exist yet — ensure_session_known only inserts once
+            # Claude Code has written the session's JSONL file to disk, which
+            # can lag the first title request — so upsert rather than update.
             if is_title_request and title_text and session_id:
                 try:
                     title = json.loads(title_text).get("title")
@@ -168,8 +171,12 @@ async def _post_messages(request: Request):
                 if isinstance(title, str) and title:
                     with conn:
                         conn.execute(
-                            "UPDATE sessions SET title = ? WHERE session_id = ?",
-                            (title, session_id),
+                            """
+                            INSERT INTO sessions (session_id, title)
+                            VALUES (?, ?)
+                            ON CONFLICT(session_id) DO UPDATE SET title = excluded.title
+                            """,
+                            (session_id, title),
                         )
 
             # Non-streaming responses, error responses, and any parse failures

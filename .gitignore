@@ -4,10 +4,10 @@ __pycache__/
 .DS_Store
 .env
 .venv
+.vscode/
 *.egg-info/
 build/
 dist/
 wheels/
 node_modules/
 backend/src/ccaudit/static/
-
