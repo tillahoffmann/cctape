@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Clock,
+  Folder,
+  Gauge,
+  GitBranch,
+  MessagesSquare,
+  Search,
+} from 'lucide-react'
 import { api, type SearchHit, type SessionSummary } from '../lib/api'
 import { LiveTimestamp } from '../lib/LiveTimestamp'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { EditableTitle } from '../lib/EditableTitle'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 function formatTokens(n: number | null): string {
   if (n == null) return '—'
@@ -45,7 +49,7 @@ function Snippet({ html }: { html: string }) {
     <>
       {parts.map((p, i) =>
         p.hit ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-800/50 rounded px-0.5">
+          <mark key={i} className="bg-primary/80 text-foreground rounded px-0.5">
             {p.text}
           </mark>
         ) : (
@@ -53,6 +57,119 @@ function Snippet({ html }: { html: string }) {
         ),
       )}
     </>
+  )
+}
+
+function MetaItem({
+  icon: Icon,
+  children,
+  title,
+  className = '',
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  children: React.ReactNode
+  title?: string
+  className?: string
+}) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-sm text-muted-foreground ${className}`}
+      title={title}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="truncate">{children}</span>
+    </span>
+  )
+}
+
+function SessionCard({
+  sessionId,
+  title,
+  cwd,
+  gitBranch,
+  lastTimestamp,
+  turnCount,
+  inputTokens,
+  outputTokens,
+  peakContextTokens,
+  snippet,
+  onTitleChange,
+}: {
+  sessionId: string
+  title: string | null
+  cwd: string | null
+  gitBranch: string | null
+  lastTimestamp?: string
+  turnCount?: number
+  inputTokens?: number | null
+  outputTokens?: number | null
+  peakContextTokens?: number | null
+  snippet?: string
+  onTitleChange: (next: string | null) => Promise<void>
+}) {
+  return (
+    <Link
+      to={`/sessions/${encodeURIComponent(sessionId)}`}
+      className="group block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+    <Card className="transition-all group-hover:border-ring group-hover:shadow-md group-hover:-translate-y-0.5">
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <CardTitle className="text-base flex-1 min-w-0">
+          <EditableTitle
+            value={title}
+            onSave={onTitleChange}
+            className="hover:bg-transparent hover:underline px-0"
+          />
+        </CardTitle>
+        <span className="font-mono text-xs text-muted-foreground shrink-0 group-hover:text-foreground">
+          {sessionId.slice(0, 8)}…
+        </span>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <MetaItem icon={Folder} title={cwd ?? ''} className="font-mono text-xs">
+            {basename(cwd)}
+          </MetaItem>
+          <MetaItem icon={GitBranch} className="font-mono text-xs">
+            {gitBranch ?? '—'}
+          </MetaItem>
+          {lastTimestamp && (
+            <MetaItem icon={Clock}>
+              <LiveTimestamp iso={lastTimestamp} />
+            </MetaItem>
+          )}
+          {turnCount !== undefined && (
+            <MetaItem icon={MessagesSquare}>
+              <span className="tabular-nums">{turnCount}</span> turns
+            </MetaItem>
+          )}
+          {inputTokens !== undefined && (
+            <MetaItem icon={ArrowDownToLine}>
+              <span className="tabular-nums">{formatTokens(inputTokens)}</span> in
+            </MetaItem>
+          )}
+          {outputTokens !== undefined && (
+            <MetaItem icon={ArrowUpFromLine}>
+              <span className="tabular-nums">{formatTokens(outputTokens)}</span> out
+            </MetaItem>
+          )}
+          {peakContextTokens !== undefined && (
+            <MetaItem icon={Gauge}>
+              <span className="tabular-nums">{formatTokens(peakContextTokens)}</span> peak
+            </MetaItem>
+          )}
+        </div>
+        {snippet && (
+          <div className="mt-3 flex items-start gap-2 text-sm">
+            <Search className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <Snippet html={snippet} />
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+    </Link>
   )
 }
 
@@ -94,6 +211,19 @@ export default function Sessions() {
     }
   }, [query])
 
+  async function updateTitle(id: string, next: string | null) {
+    await api.updateSessionTitle(id, next)
+    setSessions((prev) =>
+      prev ? prev.map((s) => (s.session_id === id ? { ...s, title: next } : s)) : prev,
+    )
+    setSearchResult((prev) => ({
+      ...prev,
+      hits: prev.hits
+        ? prev.hits.map((h) => (h.session_id === id ? { ...h, title: next } : h))
+        : prev.hits,
+    }))
+  }
+
   const trimmed = query.trim()
   const searchActive = trimmed.length > 0
   const resultsFresh = searchResult.query === trimmed
@@ -126,81 +256,40 @@ export default function Sessions() {
         ) : hits.length === 0 ? (
           <div className="text-muted-foreground text-sm">No matches.</div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Session</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Project</TableHead>
-                <TableHead>Match</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {hits.map((h) => (
-                <TableRow key={h.session_id}>
-                  <TableCell className="font-mono">
-                    <Link
-                      to={`/sessions/${encodeURIComponent(h.session_id)}`}
-                      className="underline"
-                    >
-                      {h.session_id.slice(0, 8)}…
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm">{h.title ?? '—'}</TableCell>
-                  <TableCell className="font-mono text-xs" title={h.cwd ?? ''}>
-                    {basename(h.cwd)}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <Snippet html={h.snippet} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="flex flex-col gap-3">
+            {hits.map((h) => (
+              <SessionCard
+                key={h.session_id}
+                sessionId={h.session_id}
+                title={h.title}
+                cwd={h.cwd}
+                gitBranch={h.git_branch}
+                snippet={h.snippet}
+                onTitleChange={(next) => updateTitle(h.session_id, next)}
+              />
+            ))}
+          </div>
         )
       ) : sessions.length === 0 ? (
         <div className="text-muted-foreground">No sessions recorded yet.</div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Session</TableHead>
-              <TableHead>Title</TableHead>
-              <TableHead>Project</TableHead>
-              <TableHead>Branch</TableHead>
-              <TableHead>Updated</TableHead>
-              <TableHead className="text-right">Turns</TableHead>
-              <TableHead className="text-right">In</TableHead>
-              <TableHead className="text-right">Out</TableHead>
-              <TableHead className="text-right">Peak Ctx</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sessions.map((s) => (
-              <TableRow key={s.session_id}>
-                <TableCell className="font-mono">
-                  <Link to={`/sessions/${encodeURIComponent(s.session_id)}`} className="underline">
-                    {s.session_id.slice(0, 8)}…
-                  </Link>
-                </TableCell>
-                <TableCell className="text-sm">{s.title ?? '—'}</TableCell>
-                <TableCell className="font-mono text-xs" title={s.cwd ?? ''}>
-                  {basename(s.cwd)}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {s.git_branch ?? '—'}
-                </TableCell>
-                <TableCell><LiveTimestamp iso={s.last_timestamp} /></TableCell>
-                <TableCell className="text-right tabular-nums">{s.turn_count}</TableCell>
-                <TableCell className="text-right tabular-nums">{formatTokens(s.input_tokens)}</TableCell>
-                <TableCell className="text-right tabular-nums">{formatTokens(s.output_tokens)}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatTokens(s.peak_context_tokens)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="flex flex-col gap-3">
+          {sessions.map((s) => (
+            <SessionCard
+              key={s.session_id}
+              sessionId={s.session_id}
+              title={s.title}
+              cwd={s.cwd}
+              gitBranch={s.git_branch}
+              lastTimestamp={s.last_timestamp}
+              turnCount={s.turn_count}
+              inputTokens={s.input_tokens}
+              outputTokens={s.output_tokens}
+              peakContextTokens={s.peak_context_tokens}
+              onTitleChange={(next) => updateTitle(s.session_id, next)}
+            />
+          ))}
+        </div>
       )}
     </div>
   )

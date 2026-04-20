@@ -1,11 +1,14 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useCallback, useState, useEffect, useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import { Clock, Folder, GitBranch, Hash, MessagesSquare } from 'lucide-react'
 import { api, type SessionDetail, type Turn } from '../lib/api'
 import { LiveTimestamp } from '../lib/LiveTimestamp'
+import { EditableTitle } from '../lib/EditableTitle'
+import { useHeaderSlot } from '../lib/headerSlotContext'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Collapsible,
@@ -453,27 +456,71 @@ export default function Session() {
     }
   }, [detail])
 
+  const handleTitleSave = useCallback(
+    async (next: string | null) => {
+      if (!sessionId) return
+      await api.updateSessionTitle(sessionId, next)
+      setDetail((prev) => (prev ? { ...prev, title: next } : prev))
+    },
+    [sessionId],
+  )
+
+  const headerNode = useMemo(
+    () =>
+      detail ? (
+        <>
+          <Link
+            to="/sessions"
+            className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium shrink-0 hover:bg-accent hover:text-accent-foreground"
+          >
+            ← Sessions
+          </Link>
+          <div className="flex-1 min-w-0">
+            <EditableTitle
+              value={detail.title}
+              onSave={handleTitleSave}
+              className="text-sm font-medium h-8 px-3"
+            />
+          </div>
+        </>
+      ) : null,
+    [detail, handleTitleSave],
+  )
+  useHeaderSlot(headerNode)
+
   if (error) return <div className="text-destructive">Error: {error}</div>
   if (!detail) return <div className="text-muted-foreground">Loading…</div>
 
   return (
     <div>
-      <div className="mb-4 space-y-1">
-        <div className="flex items-center gap-3">
-          <Link to="/sessions" className="underline text-sm">
-            ← Sessions
-          </Link>
-          <h2 className="text-lg font-semibold font-mono">{detail.session_id}</h2>
-          <span className="text-xs text-muted-foreground">{detail.turns.length} turns</span>
-        </div>
-        {(detail.cwd || detail.git_branch || detail.started_at || detail.is_sidechain) && (
-          <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4">
-            {detail.cwd && <span className="font-mono">{detail.cwd}</span>}
-            {detail.git_branch && <span className="font-mono">branch: {detail.git_branch}</span>}
-            {detail.is_sidechain && <span>sidechain</span>}
-            {detail.started_at && <span>started <LiveTimestamp iso={detail.started_at} /></span>}
-          </div>
+      <div className="mb-4 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+        <span className="inline-flex items-center gap-1 font-mono">
+          <Hash className="h-3.5 w-3.5 shrink-0" />
+          {detail.session_id}
+        </span>
+        {detail.cwd && (
+          <span className="inline-flex items-center gap-1 font-mono" title={detail.cwd}>
+            <Folder className="h-3.5 w-3.5 shrink-0" />
+            {detail.cwd}
+          </span>
         )}
+        {detail.git_branch && (
+          <span className="inline-flex items-center gap-1 font-mono">
+            <GitBranch className="h-3.5 w-3.5 shrink-0" />
+            {detail.git_branch}
+          </span>
+        )}
+        <span className="inline-flex items-center gap-1">
+          <MessagesSquare className="h-3.5 w-3.5 shrink-0" />
+          <span className="tabular-nums">{detail.turns.length}</span> turns
+        </span>
+        {detail.started_at && (
+          <span className="inline-flex items-center gap-1">
+            <Clock className="h-3.5 w-3.5 shrink-0" />
+            started <LiveTimestamp iso={detail.started_at} />
+          </span>
+        )}
+        {detail.is_sidechain && <span>sidechain</span>}
       </div>
       <div className="space-y-6">
         {detail.turns.map((t) => (

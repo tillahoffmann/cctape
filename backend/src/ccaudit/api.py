@@ -73,6 +73,11 @@ class SessionDetail(BaseModel):
     git_branch: str | None
     is_sidechain: bool | None
     started_at: datetime | None
+    title: str | None
+
+
+class SessionUpdate(BaseModel):
+    title: str | None = None
 
 
 class SearchHit(BaseModel):
@@ -284,11 +289,11 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
         raise HTTPException(status_code=404, detail="session not found")
 
     meta = conn.execute(
-        "SELECT cwd, git_branch, is_sidechain, started_at FROM sessions WHERE session_id = ?",
+        "SELECT cwd, git_branch, is_sidechain, started_at, title FROM sessions WHERE session_id = ?",
         (session_id,),
     ).fetchone()
-    cwd, git_branch, is_sidechain, started_at = (
-        meta if meta else (None, None, None, None)
+    cwd, git_branch, is_sidechain, started_at, title = (
+        meta if meta else (None, None, None, None, None)
     )
 
     turns: list[Turn] = []
@@ -372,4 +377,25 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             if isinstance(started_at, datetime) or started_at is None
             else datetime.fromisoformat(started_at)
         ),
+        title=title,
     )
+
+
+@router.patch("/sessions/{session_id}")
+async def _update_session(
+    request: Request, session_id: str, body: SessionUpdate
+) -> dict[str, str | None]:
+    conn: sqlite3.Connection = request.app.state.conn
+    # Empty/whitespace string clears the title; NULL makes the frontend's
+    # "Untitled" fallback kick in.
+    title = body.title.strip() if body.title is not None else None
+    if title == "":
+        title = None
+    cursor = conn.execute(
+        "UPDATE sessions SET title = ? WHERE session_id = ?",
+        (title, session_id),
+    )
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="session not found")
+    conn.commit()
+    return {"session_id": session_id, "title": title}

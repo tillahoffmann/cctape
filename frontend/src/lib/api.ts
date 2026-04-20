@@ -59,10 +59,21 @@ export interface SessionDetail {
   git_branch: string | null
   is_sidechain: boolean | null
   started_at: string | null
+  title: string | null
 }
 
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url)
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  return res.json() as Promise<T>
+}
+
+async function sendJSON<T>(url: string, method: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json() as Promise<T>
 }
@@ -82,4 +93,10 @@ export const api = {
   usage: (days = 7) => getJSON<UsageRecord[]>(`/api/usage?days=${days}`),
   search: (q: string, limit = 50) =>
     getJSON<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  updateSessionTitle: (id: string, title: string | null) =>
+    sendJSON<{ session_id: string; title: string | null }>(
+      `/api/sessions/${encodeURIComponent(id)}`,
+      'PATCH',
+      { title },
+    ),
 }
