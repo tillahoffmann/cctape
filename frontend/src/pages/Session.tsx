@@ -259,6 +259,10 @@ function fmtNum(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString()
 }
 
+function fmtPct(n: number | null | undefined): string {
+  return n == null ? '—' : `${(100 * n).toLocaleString()}%`;
+}
+
 function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (m: ViewMode) => void }) {
   const options: { value: ViewMode; label: string }[] = [
     { value: 'rendered', label: 'Rendered' },
@@ -358,9 +362,12 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
             </div>
           )}
           <div className="text-xs text-muted-foreground">
-            {fmtNum(turn.response.input_tokens)} in · {fmtNum(turn.response.output_tokens)} out
+            {fmtNum(turn.response.input_tokens)} in
+            · {fmtNum(turn.response.output_tokens)} out
             {turn.response.cache_read_input_tokens != null &&
-              ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache`}
+              ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache `}
+            · {fmtPct(turn.response.unified_5h_utilization)} 5h
+            · {fmtPct(turn.response.unified_7d_utilization)} 7d
           </div>
         </div>
       )}

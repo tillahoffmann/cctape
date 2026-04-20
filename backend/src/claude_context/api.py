@@ -53,6 +53,8 @@ class ResponseRecord(BaseModel):
     output_tokens: int | None
     cache_creation_input_tokens: int | None
     cache_read_input_tokens: int | None
+    unified_5h_utilization: float | None
+    unified_7d_utilization: float | None
 
 
 class Turn(BaseModel):
@@ -237,7 +239,9 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             resp.input_tokens AS input_tokens,
             resp.output_tokens AS output_tokens,
             resp.cache_creation_input_tokens AS cache_creation_input_tokens,
-            resp.cache_read_input_tokens AS cache_read_input_tokens
+            resp.cache_read_input_tokens AS cache_read_input_tokens,
+            resp.unified_5h_utilization AS unified_5h_utilization,
+            resp.unified_7d_utilization AS unified_7d_utilization
         FROM requests r
         LEFT JOIN responses resp ON resp.request_row_id = r.id
         WHERE r.session_id = :session_id
@@ -274,6 +278,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             output_tokens,
             cache_creation_input_tokens,
             cache_read_input_tokens,
+            unified_5h_utilization,
+            unified_7d_utilization,
         ) = row
 
         try:
@@ -308,6 +314,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
                 output_tokens=output_tokens,
                 cache_creation_input_tokens=cache_creation_input_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
+                unified_5h_utilization=unified_5h_utilization,
+                unified_7d_utilization=unified_7d_utilization,
             )
 
         turns.append(

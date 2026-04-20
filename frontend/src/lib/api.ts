@@ -40,6 +40,8 @@ export interface ResponseRecord {
   output_tokens: number | null
   cache_creation_input_tokens: number | null
   cache_read_input_tokens: number | null
+  unified_5h_utilization: number | null
+  unified_7d_utilization: number | null
 }
 
 export interface Turn {
