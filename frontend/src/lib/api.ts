@@ -6,6 +6,8 @@ export interface UsageRecord {
   cache_read_input_tokens: number
   unified_5h_utilization: number
   unified_7d_utilization: number
+  unified_5h_reset: string | null
+  unified_7d_reset: string | null
 }
 
 export interface SessionSummary {

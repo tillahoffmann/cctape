@@ -20,6 +20,8 @@ class UsageRecord(BaseModel):
     cache_read_input_tokens: int | None
     unified_5h_utilization: float | None
     unified_7d_utilization: float | None
+    unified_5h_reset: datetime | None
+    unified_7d_reset: datetime | None
 
 
 class SessionSummary(BaseModel):
@@ -85,7 +87,9 @@ async def _get_usage(request: Request, days: int = 7) -> list[UsageRecord]:
                     cache_creation_input_tokens,
                     cache_read_input_tokens,
                     unified_5h_utilization,
-                    unified_7d_utilization
+                    unified_7d_utilization,
+                    unified_5h_reset,
+                    unified_7d_reset
                 FROM responses
                 WHERE timestamp > :oldest_record
                 ORDER BY timestamp

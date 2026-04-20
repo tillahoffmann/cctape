@@ -4,12 +4,14 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   XAxis,
   YAxis,
 } from 'recharts'
 import { scaleTime } from 'd3-scale'
 import { api, type UsageRecord } from '../lib/api'
+import { useNow } from '../lib/useNow'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -25,6 +27,7 @@ export default function Usage() {
   const [records, setRecords] = useState<UsageRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [days, setDays] = useState<number>(7)
+  const now = useNow()
 
   useEffect(() => {
     api.usage(days).then(setRecords).catch((e) => setError(String(e)))
@@ -39,8 +42,31 @@ export default function Usage() {
     unified_7d_utilization: r.unified_7d_utilization,
   }))
 
+  const resets5h = Array.from(
+    new Set(
+      records
+        .map((r) => (r.unified_5h_reset ? new Date(r.unified_5h_reset).getTime() : null))
+        .filter((v): v is number => v !== null),
+    ),
+  ).sort((a, b) => a - b)
+  const resets7d = Array.from(
+    new Set(
+      records
+        .map((r) => (r.unified_7d_reset ? new Date(r.unified_7d_reset).getTime() : null))
+        .filter((v): v is number => v !== null),
+    ),
+  ).sort((a, b) => a - b)
+  const nextReset5h = resets5h.find((t) => t > now) ?? null
+  const nextReset7d = resets7d.find((t) => t > now) ?? null
+
   const tMin = data.length ? Math.min(...data.map((d) => d.t)) : 0
   const tMax = data.length ? Math.max(...data.map((d) => d.t)) : 0
+  const pastResets5h = resets5h.filter((t) => t >= tMin && t <= tMax && t <= now)
+  const pastResets7d = resets7d.filter((t) => t >= tMin && t <= tMax && t <= now)
+  const fmtAbs = (t: number) => {
+    const d = new Date(t)
+    return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+  }
   const tickDates = data.length
     ? scaleTime().domain([tMin, tMax]).ticks(7)
     : []
@@ -65,6 +91,20 @@ export default function Usage() {
             ))}
           </TabsList>
         </Tabs>
+        <div className="text-muted-foreground flex flex-col items-end text-xs leading-tight">
+          <div>
+            Next 5h reset:{' '}
+            <span className="text-foreground">
+              {nextReset5h ? fmtAbs(nextReset5h) : '—'}
+            </span>
+          </div>
+          <div>
+            Next 7d reset:{' '}
+            <span className="text-foreground">
+              {nextReset7d ? fmtAbs(nextReset7d) : '—'}
+            </span>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         {data.length === 0 ? (
@@ -107,6 +147,24 @@ export default function Usage() {
                   dot={true}
                   isAnimationActive={false}
                 />
+                {pastResets5h.map((t) => (
+                  <ReferenceLine
+                    key={`r5-${t}`}
+                    x={t}
+                    stroke="var(--color-chart-1)"
+                    strokeDasharray="2 2"
+                    strokeOpacity={0.5}
+                  />
+                ))}
+                {pastResets7d.map((t) => (
+                  <ReferenceLine
+                    key={`r7-${t}`}
+                    x={t}
+                    stroke="var(--color-chart-2)"
+                    strokeDasharray="2 2"
+                    strokeOpacity={0.5}
+                  />
+                ))}
               </LineChart>
             </ResponsiveContainer>
           </div>
