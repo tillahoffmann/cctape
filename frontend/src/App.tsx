@@ -25,7 +25,7 @@ function Header() {
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center gap-1 min-w-0">
         <Link
           to="/sessions"
-          className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium text-primary shrink-0 hover:bg-accent hover:text-accent-foreground"
+          className="inline-flex h-8 items-center rounded-md px-3 text-sm font-bold text-primary shrink-0 hover:bg-accent hover:text-accent-foreground"
         >
           ccaudit
         </Link>
