@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from claude_context import create_app
-from claude_context import sessions as sessions_module
+from ccaudit import create_app
+from ccaudit import sessions as sessions_module
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def test_sync_all_on_startup_populates_sessions(
     )
 
     db = tmp_path / "db.sqlite"
-    monkeypatch.setenv("CLAUDE_CONTEXT_DB", str(db))
+    monkeypatch.setenv("CCAUDIT_DB", str(db))
     with TestClient(create_app()):
         pass
 
@@ -81,7 +81,7 @@ def test_ensure_known_picks_up_new_session_on_proxy_request(
     tmp_path: Path, projects_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db = tmp_path / "db.sqlite"
-    monkeypatch.setenv("CLAUDE_CONTEXT_DB", str(db))
+    monkeypatch.setenv("CCAUDIT_DB", str(db))
 
     with TestClient(create_app()) as client:
         _write(projects_dir, "sess-late", cwd="/late")
@@ -110,7 +110,7 @@ def test_ensure_known_skips_when_no_transcript(
     tmp_path: Path, projects_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db = tmp_path / "db.sqlite"
-    monkeypatch.setenv("CLAUDE_CONTEXT_DB", str(db))
+    monkeypatch.setenv("CCAUDIT_DB", str(db))
 
     with TestClient(create_app()) as client:
         from unittest.mock import patch

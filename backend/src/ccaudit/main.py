@@ -34,7 +34,7 @@ sqlite3.register_converter("datetime", convert_datetime)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     database = (
-        Path(os.environ.get("CLAUDE_CONTEXT_DB", "~/.claude-context/claude-context.db"))
+        Path(os.environ.get("CCAUDIT_DB", "~/.ccaudit/ccaudit.db"))
         .expanduser()
         .resolve()
     )

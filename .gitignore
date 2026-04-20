@@ -1,5 +1,5 @@
 __pycache__/
-.claude-context.db
+.ccaudit.db
 .coverage
 .DS_Store
 .env
@@ -9,5 +9,5 @@ build/
 dist/
 wheels/
 node_modules/
-backend/src/claude_context/static/
+backend/src/ccaudit/static/
 

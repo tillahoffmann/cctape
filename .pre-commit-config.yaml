@@ -5,25 +5,25 @@ repos:
     hooks:
       - id: ruff-format
         name: ruff format
-        entry: bash -c 'uv run ruff format'
+        entry: bash -c 'cd backend && uv run ruff format'
         language: system
         files: \.py$
         pass_filenames: false
       - id: ruff-check
         name: ruff check
-        entry: bash -c 'uv run ruff check --fix'
+        entry: bash -c 'cd backend && uv run ruff check --fix'
         language: system
         files: \.py$
         pass_filenames: false
       - id: pyright
         name: pyright
-        entry: bash -c 'uv run pyright'
+        entry: bash -c 'cd backend && uv run pyright'
         language: system
         pass_filenames: false
         always_run: true
       - id: pytest
         name: pytest
-        entry: bash -c 'CI=true uv run pytest -q --cov=src/claude_context'
+        entry: bash -c 'cd backend && CI=true uv run pytest -q --cov=src/ccaudit'
         language: system
         pass_filenames: false
         always_run: true

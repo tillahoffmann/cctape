@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../backend/src/claude_context/static',
+    outDir: '../backend/src/ccaudit/static',
     emptyOutDir: true,
   },
   server: {

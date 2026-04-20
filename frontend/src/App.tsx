@@ -21,7 +21,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col">
       <header className="border-b sticky top-0 z-50 bg-background">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center gap-6">
-          <h1 className="text-sm font-semibold">Claude Context</h1>
+          <h1 className="text-sm font-semibold">ccaudit</h1>
           <nav className="flex items-center gap-1">
             <NavItem to="/sessions">Sessions</NavItem>
             <NavItem to="/usage">Usage</NavItem>
