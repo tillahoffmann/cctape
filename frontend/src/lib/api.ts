@@ -25,6 +25,7 @@ export interface SessionSummary {
   git_branch: string | null
   is_sidechain: boolean | null
   started_at: string | null
+  title: string | null
 }
 
 export interface RequestRecord {

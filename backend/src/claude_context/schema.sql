@@ -55,5 +55,6 @@ CREATE TABLE sessions (
     "cwd" TEXT,
     "started_at" DATETIME,
     "git_branch" TEXT,
-    "is_sidechain" INTEGER
+    "is_sidechain" INTEGER,
+    "title" TEXT
 );

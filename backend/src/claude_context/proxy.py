@@ -33,6 +33,12 @@ HOP_BY_HOP = {
 # client to attempt a second decompression. Only strip on the response
 # side — the request body is passed through unchanged.
 RESPONSE_HOP_BY_HOP = HOP_BY_HOP | {"content-encoding"}
+# Sensitive request headers redacted before persisting to the DB. The header is
+# still forwarded upstream unchanged.
+REDACTED_REQUEST_HEADERS = {"authorization"}
+# Headers containing secrets that must not be persisted to the database. The
+# upstream request still carries them — only the stored copy is redacted.
+REDACTED_HEADERS = {"authorization"}
 
 router = APIRouter(prefix="/proxy")
 
@@ -46,7 +52,14 @@ async def _post_messages(request: Request):
     conn: sqlite3.Connection = request.app.state.conn
     request_body = await request.body()
     values = {
-        "headers": bz2.compress(json.dumps(request.headers.items()).encode()),
+        "headers": bz2.compress(
+            json.dumps(
+                [
+                    (k, "[REDACTED]" if k.lower() in REDACTED_REQUEST_HEADERS else v)
+                    for k, v in request.headers.items()
+                ]
+            ).encode()
+        ),
         "timestamp": datetime.now(UTC).isoformat(),
         "session_id": request.headers.get("x-claude-code-session-id"),
         "system_hash": None,
@@ -59,6 +72,20 @@ async def _post_messages(request: Request):
         values.update(decompose_payload(conn, request_body))
     except (ValueError, TypeError):
         values["payload"] = bz2.compress(request_body)
+
+    # Claude Code issues a structured-output request with a {title: string}
+    # schema to generate the session title. Detect it here so we can capture
+    # the generated title from the SSE stream below.
+    is_title_request = False
+    try:
+        parsed_body = json.loads(request_body)
+        schema = (
+            parsed_body.get("output_config", {}).get("format", {}).get("schema", {})
+        )
+        props = schema.get("properties", {})
+        is_title_request = list(props.keys()) == ["title"]
+    except (ValueError, TypeError, AttributeError):
+        pass
     cursor = conn.execute(
         """
         INSERT INTO requests (
@@ -76,7 +103,8 @@ async def _post_messages(request: Request):
     request_row_id = cursor.lastrowid
     conn.commit()
 
-    ensure_session_known(conn, values["session_id"])
+    session_id = values["session_id"]
+    ensure_session_known(conn, session_id)
 
     # Send the request, excluding headers that should not be proxied.
     client: httpx.AsyncClient = request.app.state.http_client
@@ -102,12 +130,31 @@ async def _post_messages(request: Request):
             payload = b"".join(chunks)
             text = payload.decode()
             usage = {}
+            title_text = ""
             decoder = SSEDecoder()
             for line in text.splitlines():
                 event = decoder.decode(line)
-                if event and event.event == "message_delta":
+                if not event:
+                    continue
+                if event.event == "message_delta":
                     data = json.loads(event.data)
                     usage = data["usage"]
+                elif is_title_request and event.event == "content_block_delta":
+                    delta = json.loads(event.data).get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        title_text += delta.get("text", "")
+
+            # Persist the generated title against the session row.
+            if is_title_request and title_text and session_id:
+                try:
+                    title = json.loads(title_text).get("title")
+                except ValueError:
+                    title = None
+                if isinstance(title, str) and title:
+                    conn.execute(
+                        "UPDATE sessions SET title = ? WHERE session_id = ?",
+                        (title, session_id),
+                    )
 
             # Non-streaming responses, error responses, and any parse failures
             # leave usage empty; fill missing fields so the INSERT always binds.

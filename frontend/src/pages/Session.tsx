@@ -313,6 +313,22 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
   const showUser = visibleUserBlocks.length > 0
   const parsed = parseResponse(turn.response?.payload ?? null)
   const hasAssistantContent = parsed.blocks.length > 0
+  const isJsonSchema =
+    turn.request.payload?.output_config?.format?.type === 'json_schema'
+  const jsonText = isJsonSchema
+    ? parsed.blocks
+        .filter((b) => b.type === 'text' && b.text)
+        .map((b) => b.text)
+        .join('')
+    : ''
+  let prettyJson: string | null = null
+  if (isJsonSchema && jsonText) {
+    try {
+      prettyJson = JSON.stringify(JSON.parse(jsonText), null, 2)
+    } catch {
+      prettyJson = jsonText
+    }
+  }
 
   return (
     <div id={`msg-${turn.request.id}`} data-turn-id={turn.request.id} className="space-y-3 scroll-mt-20">
@@ -339,6 +355,10 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
           {mode === 'raw' ? (
             <pre className="text-xs overflow-x-auto p-3 bg-muted rounded-md whitespace-pre-wrap break-words">
               {turn.response.payload ?? '(empty response body)'}
+            </pre>
+          ) : isJsonSchema && prettyJson ? (
+            <pre className="p-3 text-xs overflow-x-auto border rounded-md whitespace-pre-wrap">
+              {prettyJson}
             </pre>
           ) : (
             <div className="space-y-2">

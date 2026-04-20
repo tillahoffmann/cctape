@@ -39,6 +39,7 @@ class SessionSummary(BaseModel):
     git_branch: str | None
     is_sidechain: bool | None
     started_at: datetime | None
+    title: str | None
 
 
 class RequestRecord(BaseModel):
@@ -149,7 +150,8 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             s.cwd AS cwd,
             s.git_branch AS git_branch,
             s.is_sidechain AS is_sidechain,
-            s.started_at AS started_at
+            s.started_at AS started_at,
+            s.title AS title
         FROM requests r
         LEFT JOIN responses resp ON resp.request_row_id = r.id
         LEFT JOIN sessions s ON s.session_id = r.session_id
@@ -205,6 +207,7 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             git_branch=git_branch,
             is_sidechain=bool(is_sidechain) if is_sidechain is not None else None,
             started_at=_dt(started_at) if started_at else None,
+            title=title,
         )
         for (
             session_id,
@@ -220,6 +223,7 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             git_branch,
             is_sidechain,
             started_at,
+            title,
         ) in rows
     ]
 

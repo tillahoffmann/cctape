@@ -43,6 +43,7 @@ export default function Sessions() {
         <TableHeader>
           <TableRow>
             <TableHead>Session</TableHead>
+            <TableHead>Title</TableHead>
             <TableHead>Project</TableHead>
             <TableHead>Branch</TableHead>
             <TableHead>Updated</TableHead>
@@ -60,6 +61,7 @@ export default function Sessions() {
                   {s.session_id.slice(0, 8)}…
                 </Link>
               </TableCell>
+              <TableCell className="text-sm">{s.title ?? '—'}</TableCell>
               <TableCell className="font-mono text-xs" title={s.cwd ?? ''}>
                 {basename(s.cwd)}
               </TableCell>
