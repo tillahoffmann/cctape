@@ -8,7 +8,7 @@ each component by sha256 into the `blobs` table. Requests store only the hashes,
 so a message that appears in N requests is stored once.
 """
 
-import bz2
+import gzip
 import hashlib
 import json
 import sqlite3
@@ -18,12 +18,14 @@ _MISSING = object()
 _HASH_SIZE = 32  # raw sha256 digest
 
 
-def _compress(data: bytes) -> bytes:
-    return bz2.compress(data)
+def compress(data: bytes) -> bytes:
+    # gzip at level 6: ~same ratio as bz2-9 on this workload, 5-10x faster.
+    # mtime=0 keeps output deterministic so identical bodies hash identically.
+    return gzip.compress(data, compresslevel=6, mtime=0)
 
 
-def _decompress(data: bytes) -> bytes:
-    return bz2.decompress(data)
+def decompress(data: bytes) -> bytes:
+    return gzip.decompress(data)
 
 
 def _canonical(value: Any) -> bytes:
@@ -43,7 +45,7 @@ def _intern(conn: sqlite3.Connection, value: Any) -> bytes | None:
     digest = hashlib.sha256(data).digest()
     conn.execute(
         "INSERT OR IGNORE INTO blobs (hash, data) VALUES (?, ?)",
-        (digest, _compress(data)),
+        (digest, compress(data)),
     )
     return digest
 
@@ -52,7 +54,7 @@ def _load_blob(conn: sqlite3.Connection, digest: bytes) -> bytes:
     row = conn.execute("SELECT data FROM blobs WHERE hash = ?", (digest,)).fetchone()
     if row is None:
         raise KeyError(f"blob {digest.hex()} missing")
-    return _decompress(row[0])
+    return decompress(row[0])
 
 
 def _split_hashes(packed: bytes | None) -> list[bytes]:
@@ -80,7 +82,7 @@ def decompose_payload(conn: sqlite3.Connection, body: bytes) -> dict[str, Any]:
     # fixed 32-byte strides is cheaper than parsing JSON and trims ~75% vs hex.
     message_hashes = b"".join(_intern(conn, m) or b"" for m in messages)
 
-    extras_blob = _compress(_canonical(parsed)) if parsed else None
+    extras_blob = compress(_canonical(parsed)) if parsed else None
 
     return {
         "system_hash": system_hash,
@@ -113,11 +115,11 @@ def reconstruct_payload(
         if payload is None:
             return None
         try:
-            return json.loads(_decompress(payload))
+            return json.loads(decompress(payload))
         except (ValueError, OSError):
             return None
 
-    result: dict[str, Any] = json.loads(_decompress(extras)) if extras else {}
+    result: dict[str, Any] = json.loads(decompress(extras)) if extras else {}
     if system_hash is not None:
         result["system"] = json.loads(_load_blob(conn, system_hash))
     if tools_hash is not None:
@@ -139,7 +141,7 @@ def first_message(
     if payload is None:
         return None
     try:
-        data = json.loads(_decompress(payload))
+        data = json.loads(decompress(payload))
     except (ValueError, OSError):
         return None
     if not isinstance(data, dict):

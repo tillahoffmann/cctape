@@ -1,4 +1,3 @@
-import bz2
 import gzip
 import os
 import sqlite3
@@ -12,6 +11,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from ccaudit import create_app
+from ccaudit.storage import decompress
 
 ROOT = Path(__file__).parent
 
@@ -89,4 +89,4 @@ def test_post_message(client: TestClient, ccaudit_db: Path, compress: bool) -> N
         ).fetchone()
         assert request_row_id == referenced_row_id
         assert output_tokens == 21
-        assert b"is there something" in bz2.decompress(payload)
+        assert b"is there something" in decompress(payload)

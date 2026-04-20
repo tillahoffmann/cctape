@@ -1,4 +1,3 @@
-import bz2
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -7,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .fts import search_sessions
-from .storage import first_message, reconstruct_payload
+from .storage import decompress, first_message, reconstruct_payload
 from .util import iter_records
 
 router = APIRouter(prefix="/api")
@@ -334,7 +333,7 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             decoded_payload: str | None = None
             if response_payload:
                 try:
-                    decoded_payload = bz2.decompress(response_payload).decode(
+                    decoded_payload = decompress(response_payload).decode(
                         "utf-8", errors="replace"
                     )
                 except Exception:

@@ -1,4 +1,3 @@
-import bz2
 import json
 import sqlite3
 from datetime import UTC, datetime
@@ -11,7 +10,7 @@ from httpx_sse._decoders import SSEDecoder
 
 from .fts import index_request_blobs
 from .sessions import ensure_known as ensure_session_known
-from .storage import decompose_payload
+from .storage import compress, decompose_payload
 
 ANTHROPIC_BASE_URL = "https://api.anthropic.com/"
 # Headers that describe a single connection hop, not the end-to-end request
@@ -53,7 +52,7 @@ async def _post_messages(request: Request):
     conn: sqlite3.Connection = request.app.state.conn
     request_body = await request.body()
     values = {
-        "headers": bz2.compress(
+        "headers": compress(
             json.dumps(
                 [
                     (k, "[REDACTED]" if k.lower() in REDACTED_REQUEST_HEADERS else v)
@@ -72,7 +71,7 @@ async def _post_messages(request: Request):
     try:
         values.update(decompose_payload(conn, request_body))
     except (ValueError, TypeError):
-        values["payload"] = bz2.compress(request_body)
+        values["payload"] = compress(request_body)
 
     # Claude Code issues a structured-output request with a {title: string}
     # schema to generate the session title. Detect it here so we can capture
@@ -189,10 +188,10 @@ async def _post_messages(request: Request):
             values = {
                 "status_code": upstream.status_code,
                 "timestamp": timestamp,
-                "headers": bz2.compress(
+                "headers": compress(
                     json.dumps(list(upstream.headers.items())).encode()
                 ),
-                "payload": bz2.compress(payload),
+                "payload": compress(payload),
                 "request_row_id": request_row_id,
                 "unified_5h_utilization": float(
                     upstream.headers["anthropic-ratelimit-unified-5h-utilization"]

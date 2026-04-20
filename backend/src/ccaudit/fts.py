@@ -13,13 +13,12 @@ bug here.
 
 from __future__ import annotations
 
-import bz2
 import json
 import logging
 import sqlite3
 from typing import Any
 
-from .storage import _split_hashes
+from .storage import _split_hashes, decompress
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +95,7 @@ def _extract_text(obj: Any) -> str:
 def extract_blob_text(data: bytes) -> str:
     """Decompress a blob payload and extract indexable text, capped to TEXT_CAP."""
     try:
-        parsed = json.loads(bz2.decompress(data))
+        parsed = json.loads(decompress(data))
     except (OSError, ValueError):
         return ""
     text = _extract_text(parsed).strip()
