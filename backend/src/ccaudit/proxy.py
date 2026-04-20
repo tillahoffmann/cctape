@@ -166,10 +166,11 @@ async def _post_messages(request: Request):
                 except ValueError:
                     title = None
                 if isinstance(title, str) and title:
-                    conn.execute(
-                        "UPDATE sessions SET title = ? WHERE session_id = ?",
-                        (title, session_id),
-                    )
+                    with conn:
+                        conn.execute(
+                            "UPDATE sessions SET title = ? WHERE session_id = ?",
+                            (title, session_id),
+                        )
 
             # Non-streaming responses, error responses, and any parse failures
             # leave usage empty; fill missing fields so the INSERT always binds.
