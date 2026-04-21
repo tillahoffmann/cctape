@@ -25,6 +25,17 @@ class UsageRecord(BaseModel):
     unified_7d_reset: datetime | None
 
 
+class AccountSummary(BaseModel):
+    account_id: str
+    message_count: int
+    first_timestamp: datetime
+    last_timestamp: datetime
+    input_tokens: int | None
+    output_tokens: int | None
+    cache_creation_input_tokens: int | None
+    cache_read_input_tokens: int | None
+
+
 class SessionSummary(BaseModel):
     session_id: str
     first_timestamp: datetime
@@ -122,12 +133,19 @@ async def _search(request: Request, q: str, limit: int = 50) -> list[SearchHit]:
 
 
 @router.get("/usage")
-async def _get_usage(request: Request, days: int = 7) -> list[UsageRecord]:
+async def _get_usage(
+    request: Request, days: int = 7, account_id: str | None = None
+) -> list[UsageRecord]:
     conn: sqlite3.Connection = request.app.state.conn
+    params: dict[str, Any] = {"oldest_record": datetime.now(UTC) - timedelta(days=days)}
+    account_clause = ""
+    if account_id is not None:
+        account_clause = " AND account_id = :account_id"
+        params["account_id"] = account_id
     return list(
         iter_records(
             conn.execute(
-                """
+                f"""
                 SELECT
                     timestamp,
                     input_tokens,
@@ -139,12 +157,39 @@ async def _get_usage(request: Request, days: int = 7) -> list[UsageRecord]:
                     unified_5h_reset,
                     unified_7d_reset
                 FROM responses
-                WHERE timestamp > :oldest_record
+                WHERE timestamp > :oldest_record{account_clause}
                 ORDER BY timestamp
                 """,
-                {"oldest_record": datetime.now(UTC) - timedelta(days=days)},
+                params,
             ),
             UsageRecord,
+        )
+    )
+
+
+@router.get("/accounts")
+async def _get_accounts(request: Request) -> list[AccountSummary]:
+    conn: sqlite3.Connection = request.app.state.conn
+    return list(
+        iter_records(
+            conn.execute(
+                """
+                SELECT
+                    account_id,
+                    COUNT(*) AS message_count,
+                    MIN(timestamp) AS first_timestamp,
+                    MAX(timestamp) AS last_timestamp,
+                    SUM(input_tokens) AS input_tokens,
+                    SUM(output_tokens) AS output_tokens,
+                    SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+                    SUM(cache_read_input_tokens) AS cache_read_input_tokens
+                FROM responses
+                WHERE account_id IS NOT NULL
+                GROUP BY account_id
+                ORDER BY message_count DESC
+                """
+            ),
+            AccountSummary,
         )
     )
 

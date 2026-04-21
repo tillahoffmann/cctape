@@ -10,7 +10,16 @@ import {
   YAxis,
 } from 'recharts'
 import { scaleTime } from 'd3-scale'
-import { api, type UsageRecord } from '../lib/api'
+import { Popover as PopoverPrimitive } from 'radix-ui'
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Check,
+  ChevronsUpDown,
+  Clock,
+  MessagesSquare,
+} from 'lucide-react'
+import { api, type AccountSummary, type UsageRecord } from '../lib/api'
 import { useNow } from '../lib/useNow'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -22,18 +31,184 @@ interface Point {
 }
 
 const RANGES = [1, 3, 7, 14, 30] as const
+const STORAGE_KEY = 'usage.selectedAccountId'
+
+function formatDate(s: string): string {
+  return new Date(s).toLocaleDateString()
+}
+
+function formatCompact(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`
+  return String(n)
+}
+
+function totalTokens(a: AccountSummary): number {
+  return (
+    (a.input_tokens ?? 0) +
+    (a.output_tokens ?? 0) +
+    (a.cache_creation_input_tokens ?? 0) +
+    (a.cache_read_input_tokens ?? 0)
+  )
+}
+
+function shortId(id: string): string {
+  const dash = id.indexOf('-')
+  return (dash > 0 ? id.slice(0, dash) : id.slice(0, 8)) + '…'
+}
+
+function AccountOption({
+  account,
+  selected,
+  onSelect,
+}: {
+  account: AccountSummary
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="hover:bg-accent data-[selected=true]:border-ring flex w-full flex-col gap-1 rounded-lg border bg-card px-3 py-2 text-left transition-colors"
+      data-selected={selected}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-sm">{account.account_id}</span>
+        {selected && <Check className="text-foreground h-4 w-4 shrink-0" />}
+      </div>
+      <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+        <span className="inline-flex items-center gap-1">
+          <MessagesSquare className="h-3.5 w-3.5" />
+          <span className="tabular-nums">{account.message_count}</span> msgs
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <ArrowDownToLine className="h-3.5 w-3.5" />
+          <span className="tabular-nums">
+            {formatCompact(account.input_tokens ?? 0)}
+          </span>{' '}
+          in
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <ArrowUpFromLine className="h-3.5 w-3.5" />
+          <span className="tabular-nums">
+            {formatCompact(account.output_tokens ?? 0)}
+          </span>{' '}
+          out
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Clock className="h-3.5 w-3.5" />
+          {formatDate(account.first_timestamp)}–
+          {formatDate(account.last_timestamp)}
+        </span>
+      </div>
+    </button>
+  )
+}
+
+function AccountPicker({
+  accounts,
+  selectedAccountId,
+  onChange,
+}: {
+  accounts: AccountSummary[]
+  selectedAccountId: string
+  onChange: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = accounts.find((a) => a.account_id === selectedAccountId)
+  return (
+    <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
+      <PopoverPrimitive.Trigger
+        className="border-input bg-background hover:bg-accent inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm transition-colors"
+      >
+        {selected ? (
+          <>
+            <span className="font-mono">{shortId(selected.account_id)}</span>
+            <span className="text-muted-foreground">·</span>
+            <span className="text-muted-foreground tabular-nums">
+              {selected.message_count} msgs
+            </span>
+            <span className="text-muted-foreground">·</span>
+            <span className="text-muted-foreground tabular-nums">
+              {formatCompact(totalTokens(selected))} tok
+            </span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">Select account…</span>
+        )}
+        <ChevronsUpDown className="text-muted-foreground ml-1 h-4 w-4" />
+      </PopoverPrimitive.Trigger>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          align="start"
+          sideOffset={6}
+          className="bg-popover text-popover-foreground z-50 w-[min(32rem,calc(100vw-2rem))] rounded-xl border p-2 shadow-md outline-none"
+        >
+          <div className="flex max-h-[70vh] flex-col gap-1.5 overflow-y-auto">
+            {accounts.map((a) => (
+              <AccountOption
+                key={a.account_id}
+                account={a}
+                selected={a.account_id === selectedAccountId}
+                onSelect={() => {
+                  onChange(a.account_id)
+                  setOpen(false)
+                }}
+              />
+            ))}
+          </div>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
+  )
+}
 
 export default function Usage() {
   const [records, setRecords] = useState<UsageRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [days, setDays] = useState<number>(7)
+  const [accounts, setAccounts] = useState<AccountSummary[] | null>(null)
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const now = useNow()
 
   useEffect(() => {
-    api.usage(days).then(setRecords).catch((e) => setError(String(e)))
-  }, [days])
+    api.accounts().then((list) => {
+      setAccounts(list)
+      if (list.length === 0) {
+        setSelectedAccountId(null)
+        return
+      }
+      const stored = localStorage.getItem(STORAGE_KEY)
+      const match = stored && list.find((a) => a.account_id === stored)
+      setSelectedAccountId(match ? match.account_id : list[0].account_id)
+    }).catch((e) => setError(String(e)))
+  }, [])
+
+  useEffect(() => {
+    if (!selectedAccountId) return
+    localStorage.setItem(STORAGE_KEY, selectedAccountId)
+    let cancelled = false
+    api
+      .usage(days, selectedAccountId)
+      .then((r) => {
+        if (!cancelled) setRecords(r)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [days, selectedAccountId])
 
   if (error) return <div className="text-destructive">Error: {error}</div>
+  if (!accounts) return <div className="text-muted-foreground">Loading…</div>
+  if (accounts.length === 0)
+    return (
+      <div className="text-muted-foreground">No account data recorded yet.</div>
+    )
   if (!records) return <div className="text-muted-foreground">Loading…</div>
 
   const data: Point[] = records.map((r) => ({
@@ -81,16 +256,23 @@ export default function Usage() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))}>
-          <TabsList>
-            {RANGES.map((d) => (
-              <TabsTrigger key={d} value={String(d)}>
-                {d}d
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+      <CardHeader className="flex flex-row items-center justify-between gap-4">
+        <div className="flex flex-row items-center gap-3">
+          <Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))}>
+            <TabsList>
+              {RANGES.map((d) => (
+                <TabsTrigger key={d} value={String(d)}>
+                  {d}d
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <AccountPicker
+            accounts={accounts}
+            selectedAccountId={selectedAccountId!}
+            onChange={setSelectedAccountId}
+          />
+        </div>
         <div className="text-muted-foreground flex flex-col items-end text-xs leading-tight">
           <div>
             Next 5h reset:{' '}

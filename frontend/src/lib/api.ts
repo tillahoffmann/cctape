@@ -93,11 +93,28 @@ export interface Config {
   anthropic_base_url: string
 }
 
+export interface AccountSummary {
+  account_id: string
+  message_count: number
+  first_timestamp: string
+  last_timestamp: string
+  input_tokens: number | null
+  output_tokens: number | null
+  cache_creation_input_tokens: number | null
+  cache_read_input_tokens: number | null
+}
+
 export const api = {
   config: () => getJSON<Config>('/api/config'),
   sessions: () => getJSON<SessionSummary[]>('/api/sessions'),
   session: (id: string) => getJSON<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
-  usage: (days = 7) => getJSON<UsageRecord[]>(`/api/usage?days=${days}`),
+  usage: (days = 7, accountId?: string) => {
+    const qs = accountId
+      ? `?days=${days}&account_id=${encodeURIComponent(accountId)}`
+      : `?days=${days}`
+    return getJSON<UsageRecord[]>(`/api/usage${qs}`)
+  },
+  accounts: () => getJSON<AccountSummary[]>('/api/accounts'),
   search: (q: string, limit = 50) =>
     getJSON<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   updateSessionTitle: (id: string, title: string | null) =>
