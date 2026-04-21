@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 from datetime import UTC, datetime
@@ -40,6 +41,19 @@ REDACTED_REQUEST_HEADERS = {"authorization"}
 # upstream request still carries them — only the stored copy is redacted.
 REDACTED_HEADERS = {"authorization"}
 
+
+def _redact_header_value(name: str, value: str) -> str:
+    """Redact sensitive header values before persisting. For `authorization`,
+    replace the secret with a short sha256 fingerprint of the token (scheme
+    stripped) so distinct keys can be told apart in stored request logs
+    without the raw token hitting disk."""
+    if name.lower() not in REDACTED_REQUEST_HEADERS:
+        return value
+    token = value.split(" ", 1)[1] if " " in value else value
+    digest = hashlib.sha256(token.encode()).hexdigest()[:12]
+    return f"[REDACTED sha256:{digest}]"
+
+
 router = APIRouter(prefix="/proxy")
 
 
@@ -54,10 +68,7 @@ async def _post_messages(request: Request):
     values = {
         "headers": compress(
             json.dumps(
-                [
-                    (k, "[REDACTED]" if k.lower() in REDACTED_REQUEST_HEADERS else v)
-                    for k, v in request.headers.items()
-                ]
+                [(k, _redact_header_value(k, v)) for k, v in request.headers.items()]
             ).encode()
         ),
         "timestamp": datetime.now(UTC).isoformat(),

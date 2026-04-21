@@ -44,7 +44,8 @@ CREATE TABLE responses (
     "unified_5h_utilization" REAL,
     "unified_7d_utilization" REAL,
     "unified_5h_reset" DATETIME,
-    "unified_7d_reset" DATETIME
+    "unified_7d_reset" DATETIME,
+    "account_id" TEXT
 );
 CREATE INDEX responses_request_id ON responses(request_row_id);
 
