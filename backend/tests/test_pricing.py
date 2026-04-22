@@ -1,4 +1,4 @@
-from ccaudit.pricing import PRICING, cost
+from cctape.pricing import PRICING, cost
 
 
 def test_cost_known_model():

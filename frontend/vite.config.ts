@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../backend/src/ccaudit/static',
+    outDir: '../backend/src/cctape/static',
     emptyOutDir: true,
   },
   server: {

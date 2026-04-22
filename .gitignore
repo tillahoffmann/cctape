@@ -1,5 +1,5 @@
 __pycache__/
-.ccaudit.db
+.cctape.db
 .coverage
 .DS_Store
 .env
@@ -10,4 +10,4 @@ build/
 dist/
 wheels/
 node_modules/
-backend/src/ccaudit/static/
+backend/src/cctape/static/

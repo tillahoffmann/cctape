@@ -10,20 +10,20 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from ccaudit import create_app
-from ccaudit.storage import decompress
+from cctape import create_app
+from cctape.storage import decompress
 
 ROOT = Path(__file__).parent
 
 
 @pytest.fixture
-def ccaudit_db(tmp_path: Path) -> Path:
-    return tmp_path / ".ccaudit.db"
+def cctape_db(tmp_path: Path) -> Path:
+    return tmp_path / ".cctape.db"
 
 
 @pytest.fixture
-def app(ccaudit_db: Path) -> Generator:
-    with patch.dict(os.environ, {"CCAUDIT_DB": str(ccaudit_db)}):
+def app(cctape_db: Path) -> Generator:
+    with patch.dict(os.environ, {"CCTAPE_DB": str(cctape_db)}):
         yield create_app()
 
 
@@ -34,7 +34,7 @@ def client(app) -> Generator:
 
 
 @pytest.mark.parametrize("compress", [False, True])
-def test_post_message(client: TestClient, ccaudit_db: Path, compress: bool) -> None:
+def test_post_message(client: TestClient, cctape_db: Path, compress: bool) -> None:
     async def _send(*args, **kwargs) -> Response:
         sample_response = (ROOT / "sample_response.txt").read_text()
         headers = {
@@ -58,7 +58,7 @@ def test_post_message(client: TestClient, ccaudit_db: Path, compress: bool) -> N
         assert b"is there something" in response.content
     mock_send.assert_called_once()
 
-    with closing(sqlite3.connect(ccaudit_db)) as conn:
+    with closing(sqlite3.connect(cctape_db)) as conn:
         (
             request_row_id,
             session_id,

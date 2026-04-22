@@ -119,7 +119,7 @@ async def _get_pricing() -> dict[str, dict[str, float]]:
 @router.get("/config")
 async def _get_config(request: Request) -> Config:
     try:
-        pkg_version: str | None = version("ccaudit")
+        pkg_version: str | None = version("cctape")
     except PackageNotFoundError:
         pkg_version = None
     base_url = str(request.base_url).rstrip("/") + "/proxy"

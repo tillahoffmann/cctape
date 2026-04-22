@@ -1,10 +1,10 @@
-# ccaudit
+# cctape
 
 A local proxy for Claude Code that archives every request and response to a SQLite database, with a web UI for browsing sessions, searching transcripts, and inspecting raw API traffic.
 
 ## Run
 
-Build the frontend once (output is served by the backend from `backend/src/ccaudit/static/`):
+Build the frontend once (output is served by the backend from `backend/src/cctape/static/`):
 
 ```bash
 cd frontend && npm install && npm run build
@@ -13,7 +13,7 @@ cd frontend && npm install && npm run build
 Start the backend:
 
 ```bash
-cd backend && uv run uvicorn --reload --factory --port=5555 ccaudit:create_app
+cd backend && uv run uvicorn --reload --factory --port=5555 cctape:create_app
 ```
 
 Point Claude Code at the proxy:
