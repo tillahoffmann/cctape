@@ -1,14 +1,29 @@
 [project]
 name = "cctape"
 version = "0.1.0"
-description = "Add your description here"
+description = "A local proxy for Claude Code that archives every request and response to a SQLite database, with a web UI for browsing sessions, searching transcripts, and inspecting raw API traffic."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.136.0",
     "httpx>=0.28.1",
     "httpx-sse>=0.4.3",
+    "uvicorn>=0.44.0",
 ]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cctape"]
+artifacts = ["src/cctape/static/**"]
+
+[tool.hatch.build.targets.sdist]
+artifacts = ["src/cctape/static/**"]
 
 [dependency-groups]
 dev = [
@@ -17,5 +32,4 @@ dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.11",
-    "uvicorn>=0.44.0",
 ]
