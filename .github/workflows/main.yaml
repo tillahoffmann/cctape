@@ -20,6 +20,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # README lives at repo root; hatch expects it inside backend/.
+      - run: cp README.md backend/README.md
+
       # Frontend: install, lint, typecheck, build (into backend/src/cctape/static/)
       - run: cd frontend && npm ci
       - run: cd frontend && npm run lint
@@ -32,7 +35,7 @@ jobs:
       - run: cd backend && uv run ruff check
       - run: cd backend && uv run pyright
       - run: cd backend && CI=true uv run pytest -q --cov=src/cctape
-      - run: cp README.md backend/README.md && cd backend && uv build
+      - run: cd backend && uv build
 
       - uses: actions/upload-artifact@v4
         with:
