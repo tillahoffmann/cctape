@@ -12,3 +12,4 @@ wheels/
 node_modules/
 backend/src/cctape/static/
 backend/README.md
+playground/

@@ -3,6 +3,7 @@ import Sessions from './pages/Sessions'
 import Session from './pages/Session'
 import Usage from './pages/Usage'
 import Settings from './pages/Settings'
+import Setup from './pages/Setup'
 import { CassetteTape } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HeaderSlotProvider } from './lib/HeaderSlot'
@@ -58,6 +59,7 @@ export default function App() {
             <Route path="/sessions/:sessionId" element={<Session />} />
             <Route path="/usage" element={<Usage />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/setup" element={<Setup />} />
             <Route path="*" element={<div className="text-muted-foreground">Not found.</div>} />
           </Routes>
         </main>

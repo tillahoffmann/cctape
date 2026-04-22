@@ -1,5 +1,8 @@
+import argparse
 import os
 import sqlite3
+import threading
+import webbrowser
 from contextlib import asynccontextmanager, closing
 from datetime import datetime
 from pathlib import Path
@@ -103,3 +106,36 @@ def create_app() -> FastAPI:
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app
+
+
+def _db_exists() -> bool:
+    database = Path(os.environ.get("CCTAPE_DB", "~/.cctape/cctape.db")).expanduser()
+    return database.is_file()
+
+
+def run() -> None:
+    """CLI entrypoint for `cctape` / `uvx cctape`."""
+    import uvicorn
+
+    parser = argparse.ArgumentParser(prog="cctape", description=__doc__)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=5555)
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open the browser automatically on first run.",
+    )
+    args = parser.parse_args()
+
+    if not args.no_browser and not _db_exists():
+        # First run: open /setup once the server is up. Delay so uvicorn
+        # is actually listening before we hit the URL.
+        url = f"http://{args.host}:{args.port}/setup"
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+
+    uvicorn.run(
+        "cctape:create_app",
+        host=args.host,
+        port=args.port,
+        factory=True,
+    )

@@ -11,6 +11,9 @@ dependencies = [
     "uvicorn>=0.44.0",
 ]
 
+[project.scripts]
+cctape = "cctape.main:run"
+
 [tool.uv]
 package = true
 
