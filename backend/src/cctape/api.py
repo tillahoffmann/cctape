@@ -184,7 +184,9 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
     conn: sqlite3.Connection = request.app.state.conn
     # Group by (account_id, model) so cost can be computed per model before
     # summing back up to the account. Totals (tokens, counts, timestamps) are
-    # collapsed across models in Python.
+    # collapsed across models in Python. Zero-usage rows (typically errors
+    # with no model_start event) are filtered out in SQL so a NULL model on
+    # such a row doesn't flip the whole account's cost to "unknown".
     rows = conn.execute(
         """
         SELECT
@@ -200,6 +202,11 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
             SUM(cache_read_input_tokens) AS cache_read_input_tokens
         FROM responses
         WHERE account_id IS NOT NULL
+          AND COALESCE(input_tokens, 0)
+            + COALESCE(output_tokens, 0)
+            + COALESCE(cache_creation_5m_input_tokens, 0)
+            + COALESCE(cache_creation_1h_input_tokens, 0)
+            + COALESCE(cache_read_input_tokens, 0) > 0
         GROUP BY account_id, model
         """
     ).fetchall()
@@ -363,8 +370,11 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
     }
 
     # Per-session cost: group responses by (session_id, model), compute cost
-    # per group, sum per session. A session is reported as None if any row has
-    # an unknown model — a partial total would silently understate cost.
+    # per group, sum per session. A session is reported as None if any row
+    # with actual token usage has an unknown model — a partial total would
+    # silently understate cost. Rows with no recorded tokens (typically
+    # errors with no model_start event) are filtered out in SQL so they
+    # don't flip otherwise-costable sessions to "unknown".
     cost_rows = conn.execute(
         """
         SELECT
@@ -378,6 +388,11 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
         FROM requests r
         JOIN responses resp ON resp.request_row_id = r.id
         WHERE r.session_id IS NOT NULL
+          AND COALESCE(resp.input_tokens, 0)
+            + COALESCE(resp.output_tokens, 0)
+            + COALESCE(resp.cache_creation_5m_input_tokens, 0)
+            + COALESCE(resp.cache_creation_1h_input_tokens, 0)
+            + COALESCE(resp.cache_read_input_tokens, 0) > 0
         GROUP BY r.session_id, resp.model
         """
     ).fetchall()

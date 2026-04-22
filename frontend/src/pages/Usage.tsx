@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { api, type AccountSummary, type UsageRecord } from '../lib/api'
 import { formatCost } from '../lib/formatCost'
+import { useAutoRefresh } from '../lib/useAutoRefresh'
 import { useNow } from '../lib/useNow'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -176,42 +177,41 @@ function AccountPicker({
 }
 
 export default function Usage() {
-  const [records, setRecords] = useState<UsageRecord[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [days, setDays] = useState<number>(7)
-  const [accounts, setAccounts] = useState<AccountSummary[] | null>(null)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const now = useNow()
 
+  const { data: accounts, error: accountsError } = useAutoRefresh<AccountSummary[]>(
+    () => api.accounts(),
+  )
+
+  // Pick an initial account once the list first arrives. Subsequent refreshes
+  // leave the user's selection alone. Linter flags setState-in-effect in
+  // general, but here it's a one-shot initialization gated by
+  // selectedAccountId === null, which is correct.
   useEffect(() => {
-    api.accounts().then((list) => {
-      setAccounts(list)
-      if (list.length === 0) {
-        setSelectedAccountId(null)
-        return
-      }
-      const stored = localStorage.getItem(STORAGE_KEY)
-      const match = stored && list.find((a) => a.account_id === stored)
-      setSelectedAccountId(match ? match.account_id : list[0].account_id)
-    }).catch((e) => setError(String(e)))
-  }, [])
+    if (accounts === null || selectedAccountId !== null) return
+    if (accounts.length === 0) return
+    const stored = localStorage.getItem(STORAGE_KEY)
+    const match = stored && accounts.find((a) => a.account_id === stored)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedAccountId(match ? match.account_id : accounts[0].account_id)
+  }, [accounts, selectedAccountId])
 
   useEffect(() => {
-    if (!selectedAccountId) return
-    localStorage.setItem(STORAGE_KEY, selectedAccountId)
-    let cancelled = false
-    api
-      .usage(days, selectedAccountId)
-      .then((r) => {
-        if (!cancelled) setRecords(r)
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [days, selectedAccountId])
+    if (selectedAccountId) localStorage.setItem(STORAGE_KEY, selectedAccountId)
+  }, [selectedAccountId])
+
+  const { data: records, error: recordsError } = useAutoRefresh<
+    UsageRecord[] | null
+  >(
+    // Match pre-refactor behavior: wait for an account selection before
+    // fetching. Returning the same null preserves object identity across ticks.
+    () => (selectedAccountId ? api.usage(days, selectedAccountId) : Promise.resolve(null)),
+    [days, selectedAccountId],
+  )
+
+  const error = accountsError ?? recordsError
 
   const derived = useMemo(() => {
     if (!records) return null

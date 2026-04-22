@@ -15,6 +15,7 @@ import { api, type SearchHit, type SessionSummary } from '../lib/api'
 import { formatCost } from '../lib/formatCost'
 import { LiveTimestamp } from '../lib/LiveTimestamp'
 import { EditableTitle } from '../lib/EditableTitle'
+import { useAutoRefresh } from '../lib/useAutoRefresh'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 function formatTokens(n: number | null): string {
@@ -183,8 +184,26 @@ function SessionCard({
 }
 
 export default function Sessions() {
-  const [sessions, setSessions] = useState<SessionSummary[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // Auto-refreshes every 3s; identical server payloads resolve to the same
+  // cached object (via ETag/304), so React skips re-renders for no-op ticks.
+  const { data: fetchedSessions, error: sessionsError } = useAutoRefresh<
+    SessionSummary[]
+  >(() => api.sessions())
+  // Local override so optimistic title updates aren't clobbered between ticks.
+  // Keyed by session_id; merged with the server copy on every render.
+  const [titleOverrides, setTitleOverrides] = useState<
+    Record<string, string | null>
+  >({})
+  const sessions = useMemo(() => {
+    if (!fetchedSessions) return null
+    if (Object.keys(titleOverrides).length === 0) return fetchedSessions
+    return fetchedSessions.map((s) =>
+      s.session_id in titleOverrides
+        ? { ...s, title: titleOverrides[s.session_id] }
+        : s,
+    )
+  }, [fetchedSessions, titleOverrides])
+  const error = sessionsError
 
   // Search state is keyed by the query it was fetched for, so a stale query's
   // results are discarded synchronously by comparing against the current input.
@@ -194,10 +213,6 @@ export default function Sessions() {
     hits: SearchHit[] | null
     error: string | null
   }>({ query: '', hits: null, error: null })
-
-  useEffect(() => {
-    api.sessions().then(setSessions).catch((e) => setError(String(e)))
-  }, [])
 
   useEffect(() => {
     const q = query.trim()
@@ -222,9 +237,7 @@ export default function Sessions() {
 
   async function updateTitle(id: string, next: string | null) {
     await api.updateSessionTitle(id, next)
-    setSessions((prev) =>
-      prev ? prev.map((s) => (s.session_id === id ? { ...s, title: next } : s)) : prev,
-    )
+    setTitleOverrides((prev) => ({ ...prev, [id]: next }))
     setSearchResult((prev) => ({
       ...prev,
       hits: prev.hits

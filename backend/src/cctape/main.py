@@ -8,8 +8,9 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
 
 from .api import router as api_router
 from .fts import backfill as fts_backfill
@@ -18,6 +19,29 @@ from .proxy import router as proxy_router
 from .sessions import sync_all as sync_sessions
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Read endpoints whose output depends only on the DB's current contents.
+# The ETag middleware attaches a DB-mtime ETag to these responses and
+# returns 304 when the client already has a fresh copy. The proxy path and
+# anything else fall straight through.
+_CACHEABLE_PATHS = frozenset(
+    {
+        "/api/sessions",
+        "/api/usage",
+        "/api/accounts",
+        "/api/search",
+    }
+)
+
+
+def _db_etag(db_path: str) -> str:
+    # Every write commit bumps the DB file mtime, so hashing it invalidates
+    # cached client responses without running a query. Quoted per RFC 7232.
+    try:
+        mtime_ns = os.stat(db_path).st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    return f'"{mtime_ns:x}"'
 
 
 # Datetime conversion based on the somewhat dubious recommendations at
@@ -101,6 +125,24 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
+
+    @app.middleware("http")
+    async def etag_middleware(request: Request, call_next):
+        # Narrow scope: only exact cacheable GETs. Everything else (proxy,
+        # /api/sessions/{id}, PATCH, static) falls through untouched.
+        if request.method != "GET" or request.url.path not in _CACHEABLE_PATHS:
+            return await call_next(request)
+        etag = _db_etag(request.app.state.db_path)
+        if request.headers.get("if-none-match") == etag:
+            return Response(
+                status_code=304,
+                headers={"ETag": etag, "Cache-Control": "no-cache"},
+            )
+        response = await call_next(request)
+        response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
     app.include_router(api_router)
     app.include_router(proxy_router)
     if STATIC_DIR.is_dir():

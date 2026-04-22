@@ -65,10 +65,22 @@ export interface SessionDetail {
   title: string | null
 }
 
+// Per-URL ETag cache. Paired with the server's ETag middleware: we send
+// If-None-Match with the last ETag we saw for this URL; the server returns
+// 304 with no body when nothing's changed, and we serve the stored data.
+const etagCache = new Map<string, { etag: string; data: unknown }>()
+
 async function getJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url)
+  const cached = etagCache.get(url)
+  const res = await fetch(url, {
+    headers: cached ? { 'if-none-match': cached.etag } : {},
+  })
+  if (res.status === 304 && cached) return cached.data as T
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json() as Promise<T>
+  const data = (await res.json()) as T
+  const etag = res.headers.get('etag')
+  if (etag) etagCache.set(url, { etag, data })
+  return data
 }
 
 async function sendJSON<T>(url: string, method: string, body: unknown): Promise<T> {

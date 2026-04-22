@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CassetteTape } from 'lucide-react'
 import { api, type Config } from '../lib/api'
+import { useAutoRefresh } from '../lib/useAutoRefresh'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CodeBlock } from '@/components/CodeBlock'
 
@@ -29,15 +30,15 @@ function Step({
 
 export default function Setup() {
   const [config, setConfig] = useState<Config | null>(null)
-  const [hasSessions, setHasSessions] = useState<boolean | null>(null)
-
   useEffect(() => {
     api.config().then(setConfig).catch(() => setConfig(null))
-    api
-      .sessions()
-      .then((list) => setHasSessions(list.length > 0))
-      .catch(() => setHasSessions(null))
   }, [])
+
+  // Poll sessions so the "receiving traffic" badge flips live the moment
+  // the first request is archived.
+  const { data: sessions } = useAutoRefresh(() => api.sessions())
+  const hasSessions =
+    sessions === null ? null : sessions.length > 0
 
   const proxyUrl =
     config?.anthropic_base_url ?? `${window.location.origin}/proxy`
