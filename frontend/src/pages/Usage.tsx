@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Legend,
@@ -213,79 +213,109 @@ export default function Usage() {
     }
   }, [days, selectedAccountId])
 
+  const derived = useMemo(() => {
+    if (!records) return null
+    const points: Point[] = new Array(records.length)
+    let tMin = Infinity
+    let tMax = -Infinity
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i]
+      const t = new Date(r.timestamp).getTime()
+      if (t < tMin) tMin = t
+      if (t > tMax) tMax = t
+      points[i] = {
+        t,
+        unified_5h_utilization: r.unified_5h_utilization,
+        unified_7d_utilization: r.unified_7d_utilization,
+      }
+    }
+    if (!records.length) {
+      tMin = 0
+      tMax = 0
+    }
+
+    const uniqueSorted = (getter: (r: UsageRecord) => string | null): number[] => {
+      const set = new Set<number>()
+      for (const r of records) {
+        const v = getter(r)
+        if (v) set.add(new Date(v).getTime())
+      }
+      return Array.from(set).sort((a, b) => a - b)
+    }
+    const resets5h = uniqueSorted((r) => r.unified_5h_reset)
+    const resets7d = uniqueSorted((r) => r.unified_7d_reset)
+
+    // Split each line at reset boundaries by inserting null entries. Recharts
+    // treats null y-values as gaps, breaking the stroke without connecting
+    // across the reset. Only resets inside the data range are inserted so the
+    // line's data doesn't widen the x-axis past the real points.
+    const buildSeries = (resets: number[]): Point[] => {
+      const merged: Point[] = points.slice()
+      for (const t of resets) {
+        if (t >= tMin && t <= tMax) {
+          merged.push({ t, unified_5h_utilization: null, unified_7d_utilization: null })
+        }
+      }
+      merged.sort((a, b) => a.t - b.t)
+      return merged
+    }
+    const data5h = buildSeries(resets5h)
+    const data7d = buildSeries(resets7d)
+
+    const tickDates = records.length
+      ? scaleTime().domain([tMin, tMax]).ticks(7)
+      : []
+    const ticks = tickDates.map((d) => d.getTime())
+    const allOnDateBoundary = tickDates.every(
+      (d) =>
+        d.getHours() === 0 &&
+        d.getMinutes() === 0 &&
+        d.getSeconds() === 0 &&
+        d.getMilliseconds() === 0,
+    )
+
+    return {
+      points,
+      resets5h,
+      resets7d,
+      data5h,
+      data7d,
+      tMin,
+      tMax,
+      ticks,
+      allOnDateBoundary,
+    }
+  }, [records])
+
   if (error) return <div className="text-destructive">Error: {error}</div>
   if (!accounts) return <div className="text-muted-foreground">Loading…</div>
   if (accounts.length === 0)
     return (
       <div className="text-muted-foreground">No account data recorded yet.</div>
     )
-  if (!records) return <div className="text-muted-foreground">Loading…</div>
+  if (!records || !derived)
+    return <div className="text-muted-foreground">Loading…</div>
 
-  const points: Point[] = records.map((r) => ({
-    t: new Date(r.timestamp).getTime(),
-    unified_5h_utilization: r.unified_5h_utilization,
-    unified_7d_utilization: r.unified_7d_utilization,
-  }))
+  const {
+    points,
+    resets5h,
+    resets7d,
+    data5h,
+    data7d,
+    tMin,
+    tMax,
+    ticks,
+    allOnDateBoundary,
+  } = derived
 
-  const resets5h = Array.from(
-    new Set(
-      records
-        .map((r) => (r.unified_5h_reset ? new Date(r.unified_5h_reset).getTime() : null))
-        .filter((v): v is number => v !== null),
-    ),
-  ).sort((a, b) => a - b)
-  const resets7d = Array.from(
-    new Set(
-      records
-        .map((r) => (r.unified_7d_reset ? new Date(r.unified_7d_reset).getTime() : null))
-        .filter((v): v is number => v !== null),
-    ),
-  ).sort((a, b) => a - b)
   const nextReset5h = resets5h.find((t) => t > now) ?? null
   const nextReset7d = resets7d.find((t) => t > now) ?? null
-
-  const tMin = points.length ? Math.min(...points.map((d) => d.t)) : 0
-  const tMax = points.length ? Math.max(...points.map((d) => d.t)) : 0
-
-  // Split each line at reset boundaries by inserting null entries. Recharts
-  // treats null y-values as gaps, breaking the stroke without connecting
-  // across the reset. Only resets inside the data range are inserted so the
-  // line's data doesn't widen the x-axis past the real points.
-  const buildSeries = (
-    key: 'unified_5h_utilization' | 'unified_7d_utilization',
-    resets: number[],
-  ): Point[] => {
-    const inRange = resets.filter((t) => t >= tMin && t <= tMax)
-    const merged: Point[] = [
-      ...points,
-      ...inRange.map((t) => ({
-        t,
-        unified_5h_utilization: null,
-        unified_7d_utilization: null,
-      })),
-    ]
-    merged.sort((a, b) => a.t - b.t)
-    return merged.map((p) => ({ ...p, [key]: p[key] }))
-  }
-  const data5h = buildSeries('unified_5h_utilization', resets5h)
-  const data7d = buildSeries('unified_7d_utilization', resets7d)
   const pastResets5h = resets5h.filter((t) => t >= tMin && t <= tMax && t <= now)
   const pastResets7d = resets7d.filter((t) => t >= tMin && t <= tMax && t <= now)
   const fmtAbs = (t: number) => {
     const d = new Date(t)
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
   }
-  const tickDates = points.length
-    ? scaleTime().domain([tMin, tMax]).ticks(7)
-    : []
-  const ticks = tickDates.map((d) => d.getTime())
-  const allOnDateBoundary = tickDates.every(
-    (d) =>
-      d.getHours() === 0 &&
-      d.getMinutes() === 0 &&
-      d.getSeconds() === 0 &&
-      d.getMilliseconds() === 0,
-  )
 
   return (
     <Card>
