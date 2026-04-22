@@ -6,6 +6,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Clock, Folder, GitBranch, Hash, MessagesSquare } from 'lucide-react'
 import { api, type SessionDetail, type Turn } from '../lib/api'
+import { formatCost } from '../lib/formatCost'
 import { LiveTimestamp } from '../lib/LiveTimestamp'
 import { EditableTitle } from '../lib/EditableTitle'
 import { useHeaderSlot } from '../lib/headerSlotContext'
@@ -391,6 +392,10 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
               ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache `}
             · {fmtPct(turn.response.unified_5h_utilization)} 5h
             · {fmtPct(turn.response.unified_7d_utilization)} 7d
+            · {formatCost(turn.response.cost_usd)}
+            {turn.response.model && (
+              <span className="ml-1 font-mono">({turn.response.model})</span>
+            )}
           </div>
         </div>
       )}

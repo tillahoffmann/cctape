@@ -17,9 +17,11 @@ import {
   Check,
   ChevronsUpDown,
   Clock,
+  DollarSign,
   MessagesSquare,
 } from 'lucide-react'
 import { api, type AccountSummary, type UsageRecord } from '../lib/api'
+import { formatCost } from '../lib/formatCost'
 import { useNow } from '../lib/useNow'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -98,6 +100,10 @@ function AccountOption({
           out
         </span>
         <span className="inline-flex items-center gap-1">
+          <DollarSign className="h-3.5 w-3.5" />
+          <span className="tabular-nums">{formatCost(account.cost_usd)}</span>
+        </span>
+        <span className="inline-flex items-center gap-1">
           <Clock className="h-3.5 w-3.5" />
           {formatDate(account.first_timestamp)}–
           {formatDate(account.last_timestamp)}
@@ -133,6 +139,10 @@ function AccountPicker({
             <span className="text-muted-foreground">·</span>
             <span className="text-muted-foreground tabular-nums">
               {formatCompact(totalTokens(selected))} tok
+            </span>
+            <span className="text-muted-foreground">·</span>
+            <span className="text-muted-foreground tabular-nums">
+              {formatCost(selected.cost_usd)}
             </span>
           </>
         ) : (

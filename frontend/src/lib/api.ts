@@ -19,6 +19,7 @@ export interface SessionSummary {
   output_tokens: number | null
   cache_creation_input_tokens: number | null
   cache_read_input_tokens: number | null
+  cost_usd: number | null
   first_message_preview: string | null
   peak_context_tokens: number | null
   cwd: string | null
@@ -45,6 +46,8 @@ export interface ResponseRecord {
   cache_read_input_tokens: number | null
   unified_5h_utilization: number | null
   unified_7d_utilization: number | null
+  model: string | null
+  cost_usd: number | null
 }
 
 export interface Turn {
@@ -102,10 +105,14 @@ export interface AccountSummary {
   output_tokens: number | null
   cache_creation_input_tokens: number | null
   cache_read_input_tokens: number | null
+  cost_usd: number | null
 }
+
+export type Pricing = Record<string, Record<string, number>>
 
 export const api = {
   config: () => getJSON<Config>('/api/config'),
+  pricing: () => getJSON<Pricing>('/api/pricing'),
   sessions: () => getJSON<SessionSummary[]>('/api/sessions'),
   session: (id: string) => getJSON<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
   usage: (days = 7, accountId?: string) => {

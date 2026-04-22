@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clock,
+  DollarSign,
   Folder,
   Gauge,
   GitBranch,
@@ -11,6 +12,7 @@ import {
   Search,
 } from 'lucide-react'
 import { api, type SearchHit, type SessionSummary } from '../lib/api'
+import { formatCost } from '../lib/formatCost'
 import { LiveTimestamp } from '../lib/LiveTimestamp'
 import { EditableTitle } from '../lib/EditableTitle'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -92,6 +94,7 @@ function SessionCard({
   inputTokens,
   outputTokens,
   peakContextTokens,
+  costUsd,
   snippet,
   onTitleChange,
 }: {
@@ -104,6 +107,7 @@ function SessionCard({
   inputTokens?: number | null
   outputTokens?: number | null
   peakContextTokens?: number | null
+  costUsd?: number | null
   snippet?: string
   onTitleChange: (next: string | null) => Promise<void>
 }) {
@@ -156,6 +160,11 @@ function SessionCard({
           {peakContextTokens !== undefined && (
             <MetaItem icon={Gauge}>
               <span className="tabular-nums">{formatTokens(peakContextTokens)}</span> peak
+            </MetaItem>
+          )}
+          {costUsd !== undefined && (
+            <MetaItem icon={DollarSign}>
+              <span className="tabular-nums">{formatCost(costUsd)}</span>
             </MetaItem>
           )}
         </div>
@@ -286,6 +295,7 @@ export default function Sessions() {
               inputTokens={s.input_tokens}
               outputTokens={s.output_tokens}
               peakContextTokens={s.peak_context_tokens}
+              costUsd={s.cost_usd}
               onTitleChange={(next) => updateTitle(s.session_id, next)}
             />
           ))}

@@ -153,6 +153,7 @@ async def _post_messages(request: Request):
             payload = b"".join(chunks)
             text = payload.decode()
             usage = {}
+            model: str | None = None
             title_text = ""
             decoder = SSEDecoder()
             # SSEDecoder dispatches a completed event only when fed the blank
@@ -162,7 +163,14 @@ async def _post_messages(request: Request):
                 event = decoder.decode(line.rstrip("\r"))
                 if not event:
                     continue
-                if event.event == "message_delta":
+                if event.event == "message_start":
+                    # Best-effort model extraction; a parse failure here must
+                    # never break the proxy — leave model as None.
+                    try:
+                        model = json.loads(event.data)["message"]["model"]
+                    except (ValueError, KeyError, TypeError):
+                        pass
+                elif event.event == "message_delta":
                     data = json.loads(event.data)
                     usage = data["usage"]
                 elif is_title_request and event.event == "content_block_delta":
@@ -232,6 +240,7 @@ async def _post_messages(request: Request):
                 )
                 if "anthropic-ratelimit-unified-7d-reset" in upstream.headers
                 else None,
+                "model": model,
                 **usage,
             }
             cursor = conn.execute(
@@ -249,7 +258,8 @@ async def _post_messages(request: Request):
                     unified_5h_utilization,
                     unified_7d_utilization,
                     unified_5h_reset,
-                    unified_7d_reset
+                    unified_7d_reset,
+                    model
                 ) VALUES (
                     :status_code,
                     :timestamp,
@@ -263,7 +273,8 @@ async def _post_messages(request: Request):
                     :unified_5h_utilization,
                     :unified_7d_utilization,
                     :unified_5h_reset,
-                    :unified_7d_reset
+                    :unified_7d_reset,
+                    :model
                 )
                 """,
                 values,

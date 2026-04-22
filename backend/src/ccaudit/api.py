@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .fts import search_sessions
+from .pricing import PRICING, cost
 from .storage import decompress, first_message, reconstruct_payload
 from .util import iter_records
 
@@ -34,6 +35,7 @@ class AccountSummary(BaseModel):
     output_tokens: int | None
     cache_creation_input_tokens: int | None
     cache_read_input_tokens: int | None
+    cost_usd: float | None
 
 
 class SessionSummary(BaseModel):
@@ -45,6 +47,7 @@ class SessionSummary(BaseModel):
     output_tokens: int | None
     cache_creation_input_tokens: int | None
     cache_read_input_tokens: int | None
+    cost_usd: float | None
     first_message_preview: str | None
     peak_context_tokens: int | None
     cwd: str | None
@@ -70,6 +73,8 @@ class ResponseRecord(BaseModel):
     cache_read_input_tokens: int | None
     unified_5h_utilization: float | None
     unified_7d_utilization: float | None
+    model: str | None
+    cost_usd: float | None
 
 
 class Turn(BaseModel):
@@ -104,6 +109,11 @@ class Config(BaseModel):
     version: str | None
     db_path: str
     anthropic_base_url: str
+
+
+@router.get("/pricing")
+async def _get_pricing() -> dict[str, dict[str, float]]:
+    return PRICING
 
 
 @router.get("/config")
@@ -170,28 +180,96 @@ async def _get_usage(
 @router.get("/accounts")
 async def _get_accounts(request: Request) -> list[AccountSummary]:
     conn: sqlite3.Connection = request.app.state.conn
-    return list(
-        iter_records(
-            conn.execute(
-                """
-                SELECT
-                    account_id,
-                    COUNT(*) AS message_count,
-                    MIN(timestamp) AS first_timestamp,
-                    MAX(timestamp) AS last_timestamp,
-                    SUM(input_tokens) AS input_tokens,
-                    SUM(output_tokens) AS output_tokens,
-                    SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
-                    SUM(cache_read_input_tokens) AS cache_read_input_tokens
-                FROM responses
-                WHERE account_id IS NOT NULL
-                GROUP BY account_id
-                ORDER BY message_count DESC
-                """
-            ),
-            AccountSummary,
+    # Group by (account_id, model) so cost can be computed per model before
+    # summing back up to the account. Totals (tokens, counts, timestamps) are
+    # collapsed across models in Python.
+    rows = conn.execute(
+        """
+        SELECT
+            account_id,
+            model,
+            COUNT(*) AS message_count,
+            MIN(timestamp) AS first_timestamp,
+            MAX(timestamp) AS last_timestamp,
+            SUM(input_tokens) AS input_tokens,
+            SUM(output_tokens) AS output_tokens,
+            SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+            SUM(cache_read_input_tokens) AS cache_read_input_tokens
+        FROM responses
+        WHERE account_id IS NOT NULL
+        GROUP BY account_id, model
+        """
+    ).fetchall()
+
+    def _dt(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(value)
+
+    agg: dict[str, dict[str, Any]] = {}
+    for (
+        account_id,
+        model,
+        message_count,
+        first_ts,
+        last_ts,
+        input_tokens,
+        output_tokens,
+        cache_creation,
+        cache_read,
+    ) in rows:
+        a = agg.setdefault(
+            account_id,
+            {
+                "account_id": account_id,
+                "message_count": 0,
+                "first_timestamp": None,
+                "last_timestamp": None,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cost_usd": 0.0,
+                "cost_known": False,
+            },
         )
-    )
+        a["message_count"] += message_count
+        first_dt, last_dt = _dt(first_ts), _dt(last_ts)
+        a["first_timestamp"] = (
+            first_dt
+            if a["first_timestamp"] is None
+            else min(a["first_timestamp"], first_dt)
+        )
+        a["last_timestamp"] = (
+            last_dt
+            if a["last_timestamp"] is None
+            else max(a["last_timestamp"], last_dt)
+        )
+        a["input_tokens"] += input_tokens or 0
+        a["output_tokens"] += output_tokens or 0
+        a["cache_creation_input_tokens"] += cache_creation or 0
+        a["cache_read_input_tokens"] += cache_read or 0
+        c = cost(model, input_tokens, output_tokens, cache_creation, cache_read)
+        if c is not None:
+            a["cost_usd"] += c
+            a["cost_known"] = True
+
+    summaries = [
+        AccountSummary(
+            account_id=a["account_id"],
+            message_count=a["message_count"],
+            first_timestamp=a["first_timestamp"],
+            last_timestamp=a["last_timestamp"],
+            input_tokens=a["input_tokens"],
+            output_tokens=a["output_tokens"],
+            cache_creation_input_tokens=a["cache_creation_input_tokens"],
+            cache_read_input_tokens=a["cache_read_input_tokens"],
+            cost_usd=a["cost_usd"] if a["cost_known"] else None,
+        )
+        for a in agg.values()
+    ]
+    summaries.sort(key=lambda s: s.message_count, reverse=True)
+    return summaries
 
 
 def _extract_preview(
@@ -277,6 +355,33 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
         for session_id, message_hashes, payload in preview_rows
     }
 
+    # Per-session cost: group responses by (session_id, model), compute cost
+    # per group, sum per session. Sessions with only unknown-model rows end up
+    # with cost_usd = None.
+    cost_rows = conn.execute(
+        """
+        SELECT
+            r.session_id,
+            resp.model,
+            SUM(resp.input_tokens),
+            SUM(resp.output_tokens),
+            SUM(resp.cache_creation_input_tokens),
+            SUM(resp.cache_read_input_tokens)
+        FROM requests r
+        JOIN responses resp ON resp.request_row_id = r.id
+        WHERE r.session_id IS NOT NULL
+        GROUP BY r.session_id, resp.model
+        """
+    ).fetchall()
+    session_costs: dict[str, float | None] = {}
+    for session_id, model, inp, out, cc, cr in cost_rows:
+        c = cost(model, inp, out, cc, cr)
+        if c is None:
+            session_costs.setdefault(session_id, None)
+            continue
+        prev = session_costs.get(session_id)
+        session_costs[session_id] = c if prev is None else prev + c
+
     # SQLite's MIN/MAX on a TEXT-stored datetime returns a string; convert.
     def _dt(value: Any) -> datetime:
         if isinstance(value, datetime):
@@ -293,6 +398,7 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             output_tokens=output_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
             cache_read_input_tokens=cache_read_input_tokens,
+            cost_usd=session_costs.get(session_id),
             first_message_preview=previews.get(session_id),
             peak_context_tokens=peak_context_tokens or None,
             cwd=cwd,
@@ -341,7 +447,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             resp.cache_creation_input_tokens AS cache_creation_input_tokens,
             resp.cache_read_input_tokens AS cache_read_input_tokens,
             resp.unified_5h_utilization AS unified_5h_utilization,
-            resp.unified_7d_utilization AS unified_7d_utilization
+            resp.unified_7d_utilization AS unified_7d_utilization,
+            resp.model AS model
         FROM requests r
         LEFT JOIN responses resp ON resp.request_row_id = r.id
         WHERE r.session_id = :session_id
@@ -380,6 +487,7 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             cache_read_input_tokens,
             unified_5h_utilization,
             unified_7d_utilization,
+            model,
         ) = row
 
         try:
@@ -416,6 +524,14 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
                 cache_read_input_tokens=cache_read_input_tokens,
                 unified_5h_utilization=unified_5h_utilization,
                 unified_7d_utilization=unified_7d_utilization,
+                model=model,
+                cost_usd=cost(
+                    model,
+                    input_tokens,
+                    output_tokens,
+                    cache_creation_input_tokens,
+                    cache_read_input_tokens,
+                ),
             )
 
         turns.append(

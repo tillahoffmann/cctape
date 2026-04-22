@@ -84,9 +84,10 @@ def test_post_message(client: TestClient, ccaudit_db: Path, compress: bool) -> N
                 is not None
             )
 
-        referenced_row_id, output_tokens, payload = conn.execute(
-            "SELECT request_row_id, output_tokens, payload FROM responses"
+        referenced_row_id, output_tokens, model, payload = conn.execute(
+            "SELECT request_row_id, output_tokens, model, payload FROM responses"
         ).fetchone()
         assert request_row_id == referenced_row_id
         assert output_tokens == 21
+        assert model == "claude-opus-4-7"
         assert b"is there something" in decompress(payload)
