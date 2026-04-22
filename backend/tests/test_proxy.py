@@ -85,11 +85,24 @@ def test_post_message(client: TestClient, ccaudit_db: Path, compress: bool) -> N
                 is not None
             )
 
-        referenced_row_id, output_tokens, model, account_id, payload = conn.execute(
-            "SELECT request_row_id, output_tokens, model, account_id, payload FROM responses"
+        (
+            referenced_row_id,
+            output_tokens,
+            model,
+            account_id,
+            cache_5m,
+            cache_1h,
+            payload,
+        ) = conn.execute(
+            "SELECT request_row_id, output_tokens, model, account_id, "
+            "cache_creation_5m_input_tokens, cache_creation_1h_input_tokens, payload "
+            "FROM responses"
         ).fetchone()
         assert request_row_id == referenced_row_id
         assert output_tokens == 21
         assert model == "claude-opus-4-7"
         assert account_id == "org-abc123"
+        # Sample response has cache_creation = {5m: 0, 1h: 42103}.
+        assert cache_5m == 0
+        assert cache_1h == 42103
         assert b"is there something" in decompress(payload)

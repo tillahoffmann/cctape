@@ -198,12 +198,52 @@ async def _post_messages(request: Request):
                             (session_id, title),
                         )
 
+            # Split the cache-creation total into 5m/1h buckets. Anthropic
+            # exposes the split as `usage.cache_creation` in `message_start`,
+            # but `message_delta.usage` places the nested object under
+            # `iterations[*].cache_creation` while only `cache_creation_input_tokens`
+            # appears at the top level. Summing across iterations is safe: a
+            # single response always reports one iteration unless server-side
+            # batching changes that. When the nested object is absent fall back
+            # to attributing the full total to the 5m bucket — that matches the
+            # pre-split default TTL.
+            iterations = usage.pop("iterations", None) or []
+            cache_split = usage.pop("cache_creation", None)
+            if cache_split is None and iterations:
+                cache_split = {
+                    "ephemeral_5m_input_tokens": sum(
+                        (it.get("cache_creation") or {}).get(
+                            "ephemeral_5m_input_tokens"
+                        )
+                        or 0
+                        for it in iterations
+                    ),
+                    "ephemeral_1h_input_tokens": sum(
+                        (it.get("cache_creation") or {}).get(
+                            "ephemeral_1h_input_tokens"
+                        )
+                        or 0
+                        for it in iterations
+                    ),
+                }
+                if not any((it.get("cache_creation") is not None) for it in iterations):
+                    cache_split = None
+            cache_total = usage.pop("cache_creation_input_tokens", None)
+            if cache_split is not None:
+                cache_5m = cache_split.get("ephemeral_5m_input_tokens")
+                cache_1h = cache_split.get("ephemeral_1h_input_tokens")
+            else:
+                cache_5m = cache_total
+                cache_1h = None
+            usage["cache_creation_5m_input_tokens"] = cache_5m
+            usage["cache_creation_1h_input_tokens"] = cache_1h
             # Non-streaming responses, error responses, and any parse failures
             # leave usage empty; fill missing fields so the INSERT always binds.
             usage = {
                 "input_tokens": None,
                 "output_tokens": None,
-                "cache_creation_input_tokens": None,
+                "cache_creation_5m_input_tokens": None,
+                "cache_creation_1h_input_tokens": None,
                 "cache_read_input_tokens": None,
             } | usage
 
@@ -254,7 +294,8 @@ async def _post_messages(request: Request):
                     request_row_id,
                     input_tokens,
                     output_tokens,
-                    cache_creation_input_tokens,
+                    cache_creation_5m_input_tokens,
+                    cache_creation_1h_input_tokens,
                     cache_read_input_tokens,
                     unified_5h_utilization,
                     unified_7d_utilization,
@@ -270,7 +311,8 @@ async def _post_messages(request: Request):
                     :request_row_id,
                     :input_tokens,
                     :output_tokens,
-                    :cache_creation_input_tokens,
+                    :cache_creation_5m_input_tokens,
+                    :cache_creation_1h_input_tokens,
                     :cache_read_input_tokens,
                     :unified_5h_utilization,
                     :unified_7d_utilization,

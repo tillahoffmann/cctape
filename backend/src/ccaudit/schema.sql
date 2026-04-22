@@ -39,7 +39,8 @@ CREATE TABLE responses (
     -- ability to summarize without loading the entire payload.
     "input_tokens" INTEGER,
     "output_tokens" INTEGER,
-    "cache_creation_input_tokens" INTEGER,
+    "cache_creation_5m_input_tokens" INTEGER,
+    "cache_creation_1h_input_tokens" INTEGER,
     "cache_read_input_tokens" INTEGER,
     "unified_5h_utilization" REAL,
     "unified_7d_utilization" REAL,

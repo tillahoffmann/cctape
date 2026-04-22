@@ -56,6 +56,34 @@ async def lifespan(app: FastAPI):
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS responses_timestamp ON responses(timestamp)"
             )
+            # Migrate responses.cache_creation_input_tokens (single total) to the
+            # split cache_creation_{5m,1h}_input_tokens columns. Pre-split rows
+            # are attributed entirely to 5m (the old default TTL). Runs before
+            # any query touches the new columns so the app never sees the old
+            # shape.
+            resp_cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(responses)").fetchall()
+            }
+            if "cache_creation_5m_input_tokens" not in resp_cols:
+                with conn:
+                    conn.execute(
+                        "ALTER TABLE responses "
+                        "ADD COLUMN cache_creation_5m_input_tokens INTEGER"
+                    )
+                    conn.execute(
+                        "ALTER TABLE responses "
+                        "ADD COLUMN cache_creation_1h_input_tokens INTEGER"
+                    )
+                    if "cache_creation_input_tokens" in resp_cols:
+                        conn.execute(
+                            "UPDATE responses SET cache_creation_5m_input_tokens = "
+                            "cache_creation_input_tokens"
+                        )
+                        conn.execute(
+                            "ALTER TABLE responses "
+                            "DROP COLUMN cache_creation_input_tokens"
+                        )
             # Idempotent: creates FTS tables on pre-existing databases and
             # indexes any blobs not yet covered. Wrapped so a failure here
             # cannot prevent the proxy from coming up.

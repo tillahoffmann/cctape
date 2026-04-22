@@ -160,7 +160,9 @@ async def _get_usage(
                     timestamp,
                     input_tokens,
                     output_tokens,
-                    cache_creation_input_tokens,
+                    COALESCE(cache_creation_5m_input_tokens, 0)
+                        + COALESCE(cache_creation_1h_input_tokens, 0)
+                        AS cache_creation_input_tokens,
                     cache_read_input_tokens,
                     unified_5h_utilization,
                     unified_7d_utilization,
@@ -193,7 +195,8 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
             MAX(timestamp) AS last_timestamp,
             SUM(input_tokens) AS input_tokens,
             SUM(output_tokens) AS output_tokens,
-            SUM(cache_creation_input_tokens) AS cache_creation_input_tokens,
+            SUM(cache_creation_5m_input_tokens) AS cache_creation_5m_input_tokens,
+            SUM(cache_creation_1h_input_tokens) AS cache_creation_1h_input_tokens,
             SUM(cache_read_input_tokens) AS cache_read_input_tokens
         FROM responses
         WHERE account_id IS NOT NULL
@@ -215,7 +218,8 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
         last_ts,
         input_tokens,
         output_tokens,
-        cache_creation,
+        cache_5m,
+        cache_1h,
         cache_read,
     ) in rows:
         a = agg.setdefault(
@@ -247,9 +251,9 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
         )
         a["input_tokens"] += input_tokens or 0
         a["output_tokens"] += output_tokens or 0
-        a["cache_creation_input_tokens"] += cache_creation or 0
+        a["cache_creation_input_tokens"] += (cache_5m or 0) + (cache_1h or 0)
         a["cache_read_input_tokens"] += cache_read or 0
-        c = cost(model, input_tokens, output_tokens, cache_creation, cache_read)
+        c = cost(model, input_tokens, output_tokens, cache_5m, cache_1h, cache_read)
         if c is not None:
             a["cost_usd"] += c
             a["cost_known"] = True
@@ -310,11 +314,15 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             COUNT(r.id) AS turn_count,
             SUM(resp.input_tokens) AS input_tokens,
             SUM(resp.output_tokens) AS output_tokens,
-            SUM(resp.cache_creation_input_tokens) AS cache_creation_input_tokens,
+            SUM(
+                COALESCE(resp.cache_creation_5m_input_tokens, 0)
+                + COALESCE(resp.cache_creation_1h_input_tokens, 0)
+            ) AS cache_creation_input_tokens,
             SUM(resp.cache_read_input_tokens) AS cache_read_input_tokens,
             MAX(
                 COALESCE(resp.input_tokens, 0)
-                + COALESCE(resp.cache_creation_input_tokens, 0)
+                + COALESCE(resp.cache_creation_5m_input_tokens, 0)
+                + COALESCE(resp.cache_creation_1h_input_tokens, 0)
                 + COALESCE(resp.cache_read_input_tokens, 0)
             ) AS peak_context_tokens,
             s.cwd AS cwd,
@@ -362,7 +370,8 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             resp.model,
             SUM(resp.input_tokens),
             SUM(resp.output_tokens),
-            SUM(resp.cache_creation_input_tokens),
+            SUM(resp.cache_creation_5m_input_tokens),
+            SUM(resp.cache_creation_1h_input_tokens),
             SUM(resp.cache_read_input_tokens)
         FROM requests r
         JOIN responses resp ON resp.request_row_id = r.id
@@ -371,8 +380,8 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
         """
     ).fetchall()
     session_costs: dict[str, float | None] = {}
-    for session_id, model, inp, out, cc, cr in cost_rows:
-        c = cost(model, inp, out, cc, cr)
+    for session_id, model, inp, out, cc_5m, cc_1h, cr in cost_rows:
+        c = cost(model, inp, out, cc_5m, cc_1h, cr)
         if c is None:
             session_costs.setdefault(session_id, None)
             continue
@@ -441,7 +450,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             resp.payload AS response_payload,
             resp.input_tokens AS input_tokens,
             resp.output_tokens AS output_tokens,
-            resp.cache_creation_input_tokens AS cache_creation_input_tokens,
+            resp.cache_creation_5m_input_tokens AS cache_creation_5m_input_tokens,
+            resp.cache_creation_1h_input_tokens AS cache_creation_1h_input_tokens,
             resp.cache_read_input_tokens AS cache_read_input_tokens,
             resp.unified_5h_utilization AS unified_5h_utilization,
             resp.unified_7d_utilization AS unified_7d_utilization,
@@ -480,7 +490,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             response_payload,
             input_tokens,
             output_tokens,
-            cache_creation_input_tokens,
+            cache_creation_5m_input_tokens,
+            cache_creation_1h_input_tokens,
             cache_read_input_tokens,
             unified_5h_utilization,
             unified_7d_utilization,
@@ -517,7 +528,13 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
                 payload=decoded_payload,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_creation_input_tokens=(cache_creation_5m_input_tokens or 0)
+                + (cache_creation_1h_input_tokens or 0)
+                if (
+                    cache_creation_5m_input_tokens is not None
+                    or cache_creation_1h_input_tokens is not None
+                )
+                else None,
                 cache_read_input_tokens=cache_read_input_tokens,
                 unified_5h_utilization=unified_5h_utilization,
                 unified_7d_utilization=unified_7d_utilization,
@@ -526,7 +543,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
                     model,
                     input_tokens,
                     output_tokens,
-                    cache_creation_input_tokens,
+                    cache_creation_5m_input_tokens,
+                    cache_creation_1h_input_tokens,
                     cache_read_input_tokens,
                 ),
             )

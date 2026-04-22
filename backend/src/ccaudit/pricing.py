@@ -3,9 +3,6 @@
 The Anthropic API does not expose a pricing endpoint, so rates are hardcoded
 here and must be updated manually when Anthropic publishes new prices. All
 rates are in USD per million tokens.
-
-Stored response rows keep a single `cache_creation_input_tokens` total rather
-than the 5m/1h split, so we use the 5m rate as the cache-write price.
 """
 
 from __future__ import annotations
@@ -45,7 +42,8 @@ def cost(
     model: str | None,
     input_tokens: int | None,
     output_tokens: int | None,
-    cache_creation_input_tokens: int | None,
+    cache_creation_5m_input_tokens: int | None,
+    cache_creation_1h_input_tokens: int | None,
     cache_read_input_tokens: int | None,
 ) -> float | None:
     """Return USD cost for a single response, or None if the model is unknown."""
@@ -58,6 +56,7 @@ def cost(
     return (
         (input_tokens or 0) * rates["input"] / million
         + (output_tokens or 0) * rates["output"] / million
-        + (cache_creation_input_tokens or 0) * rates["cache_write_5m"] / million
+        + (cache_creation_5m_input_tokens or 0) * rates["cache_write_5m"] / million
+        + (cache_creation_1h_input_tokens or 0) * rates["cache_write_1h"] / million
         + (cache_read_input_tokens or 0) * rates["cache_read"] / million
     )
