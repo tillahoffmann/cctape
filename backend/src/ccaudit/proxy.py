@@ -241,6 +241,7 @@ async def _post_messages(request: Request):
                 if "anthropic-ratelimit-unified-7d-reset" in upstream.headers
                 else None,
                 "model": model,
+                "account_id": upstream.headers.get("anthropic-organization-id"),
                 **usage,
             }
             cursor = conn.execute(
@@ -259,7 +260,8 @@ async def _post_messages(request: Request):
                     unified_7d_utilization,
                     unified_5h_reset,
                     unified_7d_reset,
-                    model
+                    model,
+                    account_id
                 ) VALUES (
                     :status_code,
                     :timestamp,
@@ -274,7 +276,8 @@ async def _post_messages(request: Request):
                     :unified_7d_utilization,
                     :unified_5h_reset,
                     :unified_7d_reset,
-                    :model
+                    :model,
+                    :account_id
                 )
                 """,
                 values,

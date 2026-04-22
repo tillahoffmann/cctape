@@ -39,6 +39,7 @@ def test_post_message(client: TestClient, ccaudit_db: Path, compress: bool) -> N
         sample_response = (ROOT / "sample_response.txt").read_text()
         headers = {
             "date": "Sat, 18 Apr 2026 19:56:51 GMT",
+            "anthropic-organization-id": "org-abc123",
         }
         if compress:
             headers["content-encoding"] = "gzip"
@@ -84,10 +85,11 @@ def test_post_message(client: TestClient, ccaudit_db: Path, compress: bool) -> N
                 is not None
             )
 
-        referenced_row_id, output_tokens, model, payload = conn.execute(
-            "SELECT request_row_id, output_tokens, model, payload FROM responses"
+        referenced_row_id, output_tokens, model, account_id, payload = conn.execute(
+            "SELECT request_row_id, output_tokens, model, account_id, payload FROM responses"
         ).fetchone()
         assert request_row_id == referenced_row_id
         assert output_tokens == 21
         assert model == "claude-opus-4-7"
+        assert account_id == "org-abc123"
         assert b"is there something" in decompress(payload)
