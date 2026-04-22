@@ -234,7 +234,7 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
                 "cache_creation_input_tokens": 0,
                 "cache_read_input_tokens": 0,
                 "cost_usd": 0.0,
-                "cost_known": False,
+                "has_unknown_model": False,
             },
         )
         a["message_count"] += message_count
@@ -254,9 +254,10 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
         a["cache_creation_input_tokens"] += (cache_5m or 0) + (cache_1h or 0)
         a["cache_read_input_tokens"] += cache_read or 0
         c = cost(model, input_tokens, output_tokens, cache_5m, cache_1h, cache_read)
-        if c is not None:
+        if c is None:
+            a["has_unknown_model"] = True
+        else:
             a["cost_usd"] += c
-            a["cost_known"] = True
 
     summaries = [
         AccountSummary(
@@ -268,7 +269,7 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
             output_tokens=a["output_tokens"],
             cache_creation_input_tokens=a["cache_creation_input_tokens"],
             cache_read_input_tokens=a["cache_read_input_tokens"],
-            cost_usd=a["cost_usd"] if a["cost_known"] else None,
+            cost_usd=None if a["has_unknown_model"] else a["cost_usd"],
         )
         for a in agg.values()
     ]
@@ -362,8 +363,8 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
     }
 
     # Per-session cost: group responses by (session_id, model), compute cost
-    # per group, sum per session. Sessions with only unknown-model rows end up
-    # with cost_usd = None.
+    # per group, sum per session. A session is reported as None if any row has
+    # an unknown model — a partial total would silently understate cost.
     cost_rows = conn.execute(
         """
         SELECT
@@ -380,14 +381,20 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
         GROUP BY r.session_id, resp.model
         """
     ).fetchall()
-    session_costs: dict[str, float | None] = {}
+    session_costs: dict[str, float] = {}
+    sessions_with_unknown: set[str] = set()
     for session_id, model, inp, out, cc_5m, cc_1h, cr in cost_rows:
         c = cost(model, inp, out, cc_5m, cc_1h, cr)
         if c is None:
-            session_costs.setdefault(session_id, None)
+            sessions_with_unknown.add(session_id)
             continue
-        prev = session_costs.get(session_id)
-        session_costs[session_id] = c if prev is None else prev + c
+        session_costs[session_id] = session_costs.get(session_id, 0.0) + c
+    session_cost_by_id: dict[str, float | None] = {
+        sid: (None if sid in sessions_with_unknown else total)
+        for sid, total in session_costs.items()
+    }
+    for sid in sessions_with_unknown:
+        session_cost_by_id.setdefault(sid, None)
 
     # SQLite's MIN/MAX on a TEXT-stored datetime returns a string; convert.
     def _dt(value: Any) -> datetime:
@@ -405,7 +412,7 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             output_tokens=output_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
             cache_read_input_tokens=cache_read_input_tokens,
-            cost_usd=session_costs.get(session_id),
+            cost_usd=session_cost_by_id.get(session_id),
             first_message_preview=previews.get(session_id),
             peak_context_tokens=peak_context_tokens or None,
             cwd=cwd,
