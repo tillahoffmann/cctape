@@ -49,6 +49,7 @@ CREATE TABLE responses (
     "model" TEXT
 );
 CREATE INDEX responses_request_id ON responses(request_row_id);
+CREATE INDEX responses_timestamp ON responses(timestamp);
 
 -- Session metadata sourced from the first entry of the JSONL transcript at
 -- ~/.claude/projects/<encoded-cwd>/<session_id>.jsonl.

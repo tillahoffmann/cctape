@@ -28,8 +28,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface Point {
   t: number
-  unified_5h_utilization: number
-  unified_7d_utilization: number
+  unified_5h_utilization: number | null
+  unified_7d_utilization: number | null
 }
 
 const RANGES = [1, 3, 7, 14, 30] as const
@@ -221,7 +221,7 @@ export default function Usage() {
     )
   if (!records) return <div className="text-muted-foreground">Loading…</div>
 
-  const data: Point[] = records.map((r) => ({
+  const points: Point[] = records.map((r) => ({
     t: new Date(r.timestamp).getTime(),
     unified_5h_utilization: r.unified_5h_utilization,
     unified_7d_utilization: r.unified_7d_utilization,
@@ -244,15 +244,38 @@ export default function Usage() {
   const nextReset5h = resets5h.find((t) => t > now) ?? null
   const nextReset7d = resets7d.find((t) => t > now) ?? null
 
-  const tMin = data.length ? Math.min(...data.map((d) => d.t)) : 0
-  const tMax = data.length ? Math.max(...data.map((d) => d.t)) : 0
+  const tMin = points.length ? Math.min(...points.map((d) => d.t)) : 0
+  const tMax = points.length ? Math.max(...points.map((d) => d.t)) : 0
+
+  // Split each line at reset boundaries by inserting null entries. Recharts
+  // treats null y-values as gaps, breaking the stroke without connecting
+  // across the reset. Only resets inside the data range are inserted so the
+  // line's data doesn't widen the x-axis past the real points.
+  const buildSeries = (
+    key: 'unified_5h_utilization' | 'unified_7d_utilization',
+    resets: number[],
+  ): Point[] => {
+    const inRange = resets.filter((t) => t >= tMin && t <= tMax)
+    const merged: Point[] = [
+      ...points,
+      ...inRange.map((t) => ({
+        t,
+        unified_5h_utilization: null,
+        unified_7d_utilization: null,
+      })),
+    ]
+    merged.sort((a, b) => a.t - b.t)
+    return merged.map((p) => ({ ...p, [key]: p[key] }))
+  }
+  const data5h = buildSeries('unified_5h_utilization', resets5h)
+  const data7d = buildSeries('unified_7d_utilization', resets7d)
   const pastResets5h = resets5h.filter((t) => t >= tMin && t <= tMax && t <= now)
   const pastResets7d = resets7d.filter((t) => t >= tMin && t <= tMax && t <= now)
   const fmtAbs = (t: number) => {
     const d = new Date(t)
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
   }
-  const tickDates = data.length
+  const tickDates = points.length
     ? scaleTime().domain([tMin, tMax]).ticks(7)
     : []
   const ticks = tickDates.map((d) => d.getTime())
@@ -299,14 +322,14 @@ export default function Usage() {
         </div>
       </CardHeader>
       <CardContent>
-        {data.length === 0 ? (
+        {points.length === 0 ? (
           <div className="text-muted-foreground py-12 text-center">
             No usage data in the last {days} day{days === 1 ? '' : 's'}.
           </div>
         ) : (
           <div style={{ width: '100%', height: 420 }}>
             <ResponsiveContainer>
-              <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+              <LineChart margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
                   dataKey="t"
@@ -324,19 +347,23 @@ export default function Usage() {
                 <YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
                 <Legend />
                 <Line
-                  type="monotone"
+                  data={data5h}
+                  type="stepAfter"
                   dataKey="unified_5h_utilization"
                   name="5h"
                   stroke="var(--color-chart-1)"
-                  dot={true}
+                  dot={false}
+                  connectNulls={false}
                   isAnimationActive={false}
                 />
                 <Line
-                  type="monotone"
+                  data={data7d}
+                  type="stepAfter"
                   dataKey="unified_7d_utilization"
                   name="7d"
                   stroke="var(--color-chart-2)"
-                  dot={true}
+                  dot={false}
+                  connectNulls={false}
                   isAnimationActive={false}
                 />
                 {pastResets5h.map((t) => (

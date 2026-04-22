@@ -52,6 +52,10 @@ async def lifespan(app: FastAPI):
             if not db_exists:
                 schema_path = Path(__file__).parent / "schema.sql"
                 conn.executescript(schema_path.read_text())
+            # Idempotent index creation for databases that predate this index.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS responses_timestamp ON responses(timestamp)"
+            )
             # Idempotent: creates FTS tables on pre-existing databases and
             # indexes any blobs not yet covered. Wrapped so a failure here
             # cannot prevent the proxy from coming up.
