@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type Config, type Pricing } from '../lib/api'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
@@ -23,6 +24,34 @@ function formatRate(n: number | undefined): string {
   return `$${n.toFixed(2)}`
 }
 
+function CodeBlock({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // ignore
+    }
+  }
+  return (
+    <div className="relative">
+      <pre className="bg-muted text-sm rounded-md p-3 pr-16 overflow-x-auto font-mono">
+        {code}
+      </pre>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onCopy}
+        className="absolute top-1.5 right-1.5"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </Button>
+    </div>
+  )
+}
+
 export default function Settings() {
   const [config, setConfig] = useState<Config | null>(null)
   const [pricing, setPricing] = useState<Pricing | null>(null)
@@ -44,28 +73,40 @@ export default function Settings() {
   ]
 
   const models = Object.keys(pricing).sort()
+  const proxyUrl = `${window.location.origin}/proxy`
+  const envExport = `export ANTHROPIC_BASE_URL=${proxyUrl}`
+  const vscodeSnippet = `"claudeCode.environmentVariables": [
+    {"name": "ANTHROPIC_BASE_URL", "value": "${proxyUrl}"}
+]`
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>Settings</CardTitle>
+          <CardTitle>Setup</CardTitle>
+          <p className="text-muted-foreground text-xs">
+            Point Claude Code at this proxy so requests get archived here.
+          </p>
         </CardHeader>
-        <CardContent>
-          <Table>
-            <TableBody>
-              {rows.map(({ label, value }) => (
-                <TableRow key={label}>
-                  <TableCell className="text-muted-foreground w-1/3 font-medium">
-                    {label}
-                  </TableCell>
-                  <TableCell className="font-mono text-sm break-all">
-                    {value ?? '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <div className="text-sm font-medium">Shell environment</div>
+            <p className="text-muted-foreground text-xs">
+              Add to <span className="font-mono">~/.zshrc</span> or{' '}
+              <span className="font-mono">~/.bashrc</span>, then start Claude
+              Code from a new shell.
+            </p>
+            <CodeBlock code={envExport} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="text-sm font-medium">
+              Claude Code VS Code extension
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Add to user <span className="font-mono">settings.json</span>.
+            </p>
+            <CodeBlock code={vscodeSnippet} />
+          </div>
         </CardContent>
       </Card>
 
@@ -101,6 +142,28 @@ export default function Settings() {
                       {formatRate(pricing[model][c.key])}
                     </TableCell>
                   ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>About</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableBody>
+              {rows.map(({ label, value }) => (
+                <TableRow key={label}>
+                  <TableCell className="text-muted-foreground w-1/3 font-medium">
+                    {label}
+                  </TableCell>
+                  <TableCell className="font-mono text-sm break-all">
+                    {value ?? '—'}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
