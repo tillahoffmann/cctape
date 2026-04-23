@@ -3,7 +3,13 @@
 [![PyPI version](https://img.shields.io/pypi/v/cctape.svg)](https://pypi.org/project/cctape/)
 [![CI](https://github.com/tillahoffmann/cctape/actions/workflows/main.yaml/badge.svg)](https://github.com/tillahoffmann/cctape/actions/workflows/main.yaml)
 
-A local proxy for Claude Code that archives every request and response to a SQLite database, with a web UI for browsing sessions, searching transcripts, inspecting raw API traffic, and tracking token usage and cost.
+A local proxy for Claude Code that archives every request and response, with a web UI for browsing sessions, searching transcripts, inspecting raw API traffic, and tracking token usage and cost.
+
+## Features
+
+- **Find any past conversation.** Full-text search across every session you've ever run, with ranked results and highlighted snippets.
+- **See what Claude costs you.** Token and dollar spend broken down by session, account, and model, plus a live chart of how close you are to your 5-hour and weekly rate limits.
+- **Let Claude search its own history.** A built-in MCP server so the agent can look up what you discussed last week instead of re-deriving context you already paid for.
 
 ## Quick start
 
@@ -36,6 +42,16 @@ Add to user settings:
     {"name": "ANTHROPIC_BASE_URL", "value": "http://127.0.0.1:5555/proxy"}
 ]
 ```
+
+### MCP server
+
+Register the MCP server with the `claude` CLI so Claude Code can search its own archive:
+
+```bash
+claude mcp add --transport http cctape http://127.0.0.1:5555/mcp
+```
+
+This exposes `search_transcripts` and `get_session_window` to the agent.
 
 ### Flags and environment variables
 
