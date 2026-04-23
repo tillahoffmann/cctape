@@ -174,10 +174,22 @@ function CollapsibleBlock({ label, body }: { label: string; body: string }) {
 function ToolUseBlock({ toolUse, result }: { toolUse: Block; result?: Block }) {
   const [open, setOpen] = useState(false)
   const pending = !result
-  const resultContent = result
+  const resultBlocks: Block[] = Array.isArray(result?.content)
+    ? (result!.content as Block[])
+    : []
+  const resultImages = resultBlocks
+    .filter((b) => b && b.type === 'image')
+    .map((b) => imageSrcFromBlock(b))
+    .filter((s): s is string => !!s)
+  const resultText = result
     ? typeof result.content === 'string'
       ? result.content
-      : JSON.stringify(result.content, null, 2)
+      : resultBlocks.length
+        ? resultBlocks
+            .filter((b) => b.type !== 'image')
+            .map((b) => (b.type === 'text' && typeof b.text === 'string' ? b.text : JSON.stringify(b, null, 2)))
+            .join('\n')
+        : JSON.stringify(result.content, null, 2)
     : null
   const inputJson =
     typeof toolUse.input === 'string' ? toolUse.input : JSON.stringify(toolUse.input, null, 2)
@@ -207,13 +219,20 @@ function ToolUseBlock({ toolUse, result }: { toolUse: Block; result?: Block }) {
               No response yet.
             </div>
           ) : (
-            <pre
-              className={`p-3 text-xs overflow-x-auto border rounded-md whitespace-pre-wrap ${
-                isError ? 'border-destructive/50' : ''
-              }`}
-            >
-              {resultContent}
-            </pre>
+            <div className="space-y-2">
+              {resultText && (
+                <pre
+                  className={`p-3 text-xs overflow-x-auto border rounded-md whitespace-pre-wrap ${
+                    isError ? 'border-destructive/50' : ''
+                  }`}
+                >
+                  {resultText}
+                </pre>
+              )}
+              {resultImages.map((src, i) => (
+                <ImageBlock key={i} src={src} />
+              ))}
+            </div>
           )}
         </div>
       </CollapsibleContent>
@@ -244,6 +263,27 @@ function renderTextBlock(block: Block, key: number | string) {
   return <MarkdownText key={key}>{block.text}</MarkdownText>
 }
 
+function imageSrcFromBlock(block: Block): string | null {
+  const source = (block as { source?: unknown }).source
+  if (!source || typeof source !== 'object') return null
+  const s = source as { type?: string; media_type?: string; data?: string; url?: string }
+  if (s.type === 'base64' && s.data && s.media_type) {
+    return `data:${s.media_type};base64,${s.data}`
+  }
+  if (s.type === 'url' && s.url) return s.url
+  return null
+}
+
+function ImageBlock({ src }: { src: string }) {
+  return (
+    <img
+      src={src}
+      alt=""
+      className="my-2 max-w-full h-auto rounded-md border"
+    />
+  )
+}
+
 function renderUserBlock(block: Block, key: number) {
   if (block.type === 'text' && block.text) {
     return (
@@ -251,6 +291,10 @@ function renderUserBlock(block: Block, key: number) {
         {block.text}
       </div>
     )
+  }
+  if (block.type === 'image') {
+    const src = imageSrcFromBlock(block)
+    if (src) return <ImageBlock key={key} src={src} />
   }
   return (
     <pre key={key} className="text-xs overflow-x-auto">
