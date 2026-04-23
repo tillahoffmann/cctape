@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { Clock, Folder, GitBranch, Hash, MessagesSquare } from 'lucide-react'
+import { Check, Clock, Copy, Folder, GitBranch, Hash, MessagesSquare } from 'lucide-react'
 import { api, type SessionDetail, type Turn } from '../lib/api'
 import { formatCost } from '../lib/formatCost'
 import { LiveTimestamp } from '../lib/LiveTimestamp'
@@ -311,6 +311,39 @@ function fmtPct(n: number | null | undefined): string {
   return n == null ? '—' : `${(100 * n).toLocaleString()}%`;
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const disabled = !text
+  const onClick = async () => {
+    if (disabled) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      // ignore
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={copied ? 'Copied' : 'Copy markdown'}
+      className="inline-flex items-center text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  )
+}
+
+function textFromBlocks(blocks: Block[]): string {
+  return blocks
+    .filter((b) => b.type === 'text' && b.text)
+    .map((b) => b.text as string)
+    .join('\n\n')
+}
+
 function ViewModeToggle({ mode, onChange }: { mode: ViewMode; onChange: (m: ViewMode) => void }) {
   const options: { value: ViewMode; label: string }[] = [
     { value: 'rendered', label: 'Rendered' },
@@ -383,8 +416,9 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
       {showUser && (
         <div className="flex justify-end">
           <div className="max-w-[80%] space-y-2">
-            <div className="text-xs text-muted-foreground">
+            <div className="flex items-center gap-3 text-xs text-muted-foreground justify-end">
               <LiveTimestamp iso={turn.request.timestamp} />
+              <CopyButton text={textFromBlocks(visibleUserBlocks)} />
             </div>
             <Card>
               <CardContent className="space-y-2">
@@ -399,6 +433,7 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span><LiveTimestamp iso={turn.response.timestamp} /></span>
             <ViewModeToggle mode={mode} onChange={setMode} />
+            <CopyButton text={textFromBlocks(parsed.blocks)} />
           </div>
           {mode === 'raw' ? (
             <pre className="text-xs overflow-x-auto p-3 bg-muted rounded-md whitespace-pre-wrap break-words">
