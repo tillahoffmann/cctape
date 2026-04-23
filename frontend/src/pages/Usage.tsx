@@ -6,9 +6,11 @@ import {
   LineChart,
   ReferenceLine,
   ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
+import type { TooltipContentProps } from 'recharts'
 import { scaleTime } from 'd3-scale'
 import { Popover as PopoverPrimitive } from 'radix-ui'
 import {
@@ -317,6 +319,41 @@ export default function Usage() {
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
   }
 
+  const fmtPct = (v: number | null | undefined) =>
+    v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`
+
+  const UsageTooltip = ({ active, payload }: TooltipContentProps) => {
+    if (!active || !payload || payload.length === 0) return null
+    const first = payload[0] as { payload?: { t?: number } } | undefined
+    const t = first?.payload?.t
+    if (t === undefined) return null
+    const v5 =
+      payload.find((p) => p.dataKey === 'unified_5h_utilization')?.value ?? null
+    const v7 =
+      payload.find((p) => p.dataKey === 'unified_7d_utilization')?.value ?? null
+    return (
+      <div className="bg-popover text-popover-foreground animate-in fade-in-0 rounded-md border px-2.5 py-1.5 text-xs shadow-md duration-100">
+        <div className="text-muted-foreground mb-1 tabular-nums">{fmtAbs(t)}</div>
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: 'var(--color-chart-1)' }}
+          />
+          <span className="text-muted-foreground">5h</span>
+          <span className="ml-auto tabular-nums">{fmtPct(v5 as number | null)}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: 'var(--color-chart-2)' }}
+          />
+          <span className="text-muted-foreground">7d</span>
+          <span className="ml-auto tabular-nums">{fmtPct(v7 as number | null)}</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-4">
@@ -375,6 +412,7 @@ export default function Usage() {
                   }}
                 />
                 <YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
+                <Tooltip content={UsageTooltip} isAnimationActive={false} />
                 <Legend />
                 <Line
                   data={data5h}
