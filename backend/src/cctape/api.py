@@ -100,6 +100,7 @@ class SearchHit(BaseModel):
     session_id: str
     snippet: str
     rank: float
+    hit_count: int
     title: str | None
     cwd: str | None
     git_branch: str | None

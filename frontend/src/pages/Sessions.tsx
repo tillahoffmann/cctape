@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -97,6 +97,7 @@ function SessionCard({
   peakContextTokens,
   costUsd,
   snippet,
+  hitCount,
   onTitleChange,
 }: {
   sessionId: string
@@ -110,6 +111,7 @@ function SessionCard({
   peakContextTokens?: number | null
   costUsd?: number | null
   snippet?: string
+  hitCount?: number
   onTitleChange: (next: string | null) => Promise<void>
 }) {
   return (
@@ -132,6 +134,11 @@ function SessionCard({
       </CardHeader>
       <CardContent>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {hitCount !== undefined && (
+            <MetaItem icon={Search} className="!text-primary font-medium">
+              <span className="tabular-nums">{hitCount}</span> {hitCount === 1 ? 'hit' : 'hits'}
+            </MetaItem>
+          )}
           <MetaItem icon={Folder} title={cwd ?? ''} className="font-mono text-xs">
             {basename(cwd)}
           </MetaItem>
@@ -170,11 +177,8 @@ function SessionCard({
           )}
         </div>
         {snippet && (
-          <div className="mt-3 flex items-start gap-2 text-sm">
-            <Search className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0">
-              <Snippet html={snippet} />
-            </div>
+          <div className="mt-3 text-sm min-w-0">
+            <Snippet html={snippet} />
           </div>
         )}
       </CardContent>
@@ -207,7 +211,20 @@ export default function Sessions() {
 
   // Search state is keyed by the query it was fetched for, so a stale query's
   // results are discarded synchronously by comparing against the current input.
-  const [query, setQuery] = useState('')
+  // `query` is mirrored to `?query=` so refresh / bookmark restores the search.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const query = searchParams.get('query') ?? ''
+  const setQuery = (next: string) => {
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev)
+        if (next) p.set('query', next)
+        else p.delete('query')
+        return p
+      },
+      { replace: true },
+    )
+  }
   const [searchResult, setSearchResult] = useState<{
     query: string
     hits: SearchHit[] | null
@@ -246,6 +263,11 @@ export default function Sessions() {
     }))
   }
 
+  const sessionsById = useMemo(
+    () => new Map((sessions ?? []).map((s) => [s.session_id, s])),
+    [sessions],
+  )
+
   const trimmed = query.trim()
   const searchActive = trimmed.length > 0
   const resultsFresh = searchResult.query === trimmed
@@ -279,17 +301,29 @@ export default function Sessions() {
           <div className="text-muted-foreground text-sm">No matches.</div>
         ) : (
           <div className="flex flex-col gap-3">
-            {hits.map((h) => (
-              <SessionCard
-                key={h.session_id}
-                sessionId={h.session_id}
-                title={h.title}
-                cwd={h.cwd}
-                gitBranch={h.git_branch}
-                snippet={h.snippet}
-                onTitleChange={(next) => updateTitle(h.session_id, next)}
-              />
-            ))}
+            {[...hits]
+              .sort((a, b) => b.hit_count - a.hit_count)
+              .map((h) => {
+                const s = sessionsById.get(h.session_id)
+                return (
+                  <SessionCard
+                    key={h.session_id}
+                    sessionId={h.session_id}
+                    title={h.title}
+                    cwd={h.cwd}
+                    gitBranch={h.git_branch}
+                    lastTimestamp={s?.last_timestamp}
+                    turnCount={s?.turn_count}
+                    inputTokens={s?.input_tokens}
+                    outputTokens={s?.output_tokens}
+                    peakContextTokens={s?.peak_context_tokens}
+                    costUsd={s?.cost_usd}
+                    snippet={h.snippet}
+                    hitCount={h.hit_count}
+                    onTitleChange={(next) => updateTitle(h.session_id, next)}
+                  />
+                )
+              })}
           </div>
         )
       ) : sessions.length === 0 ? (

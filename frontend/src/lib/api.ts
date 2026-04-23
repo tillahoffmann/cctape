@@ -97,6 +97,7 @@ export interface SearchHit {
   session_id: string
   snippet: string
   rank: number
+  hit_count: number
   title: string | null
   cwd: string | null
   git_branch: string | null

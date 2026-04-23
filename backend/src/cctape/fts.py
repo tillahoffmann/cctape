@@ -300,11 +300,13 @@ def search_sessions(
                 hh.rank AS rank,
                 ROW_NUMBER() OVER (
                     PARTITION BY sb.session_id ORDER BY hh.rank ASC
-                ) AS rn
+                ) AS rn,
+                COUNT(*) OVER (PARTITION BY sb.session_id) AS hit_count
             FROM hit_hashes hh
             JOIN session_blobs sb ON sb.hash = hh.hash
         )
-        SELECT sh.session_id, sh.hash, sh.rank, s.title, s.cwd, s.git_branch
+        SELECT sh.session_id, sh.hash, sh.rank, sh.hit_count,
+               s.title, s.cwd, s.git_branch
         FROM session_hits sh
         LEFT JOIN sessions s ON s.session_id = sh.session_id
         WHERE sh.rn = 1
@@ -316,7 +318,7 @@ def search_sessions(
 
     terms = [w for w in query.split() if w]
     results = []
-    for session_id, digest, rank, title, cwd, git_branch in rows:
+    for session_id, digest, rank, hit_count, title, cwd, git_branch in rows:
         blob_row = conn.execute(
             "SELECT data FROM blobs WHERE hash = ?", (digest,)
         ).fetchone()
@@ -326,6 +328,7 @@ def search_sessions(
                 "session_id": session_id,
                 "snippet": _build_snippet(snippet_text, terms),
                 "rank": rank,
+                "hit_count": hit_count,
                 "title": title,
                 "cwd": cwd,
                 "git_branch": git_branch,
