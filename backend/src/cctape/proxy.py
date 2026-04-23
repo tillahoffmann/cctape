@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from httpx_sse._decoders import SSEDecoder
 
+from . import mcp_caller
 from .fts import index_request_blobs
 from .sessions import ensure_known as ensure_session_known
 from .storage import compress, decompose_payload
@@ -142,14 +143,94 @@ async def _post_messages(request: Request):
 
     async def body():
         chunks = []
+        # Inline SSE decoder for detecting mcp__cctape__ tool_use blocks as
+        # they stream past. This must happen BEFORE the chunk is yielded to
+        # the client: the client fires the MCP tool call the moment it sees
+        # content_block_stop, and if we defer recording to the `finally`
+        # block (which runs only after the stream fully closes), the MCP
+        # call's lookup happens against an empty cache.
+        inline_decoder = SSEDecoder()
+        cctape_tool_blocks: dict[int, dict[str, str]] = {}
+
+        def _feed_line(line: str) -> None:
+            # Feeds a single SSE line (already line-terminator-stripped) through
+            # the decoder. Empty strings signal end-of-event and are meaningful;
+            # the caller MUST only pass them when they came from a real blank
+            # line in the stream, not as artifacts of split("\n") trailing.
+            try:
+                event = inline_decoder.decode(line.rstrip("\r"))
+            except Exception:
+                return
+            if not event:
+                return
+            try:
+                if event.event == "content_block_start":
+                    data = json.loads(event.data)
+                    block = data.get("content_block") or {}
+                    if block.get("type") == "tool_use":
+                        name = block.get("name") or ""
+                        if name.startswith("mcp__cctape__"):
+                            cctape_tool_blocks[int(data["index"])] = {
+                                "name": name,
+                                "input": "",
+                            }
+                elif event.event == "content_block_delta":
+                    data = json.loads(event.data)
+                    delta = data.get("delta") or {}
+                    if delta.get("type") == "input_json_delta":
+                        idx = data.get("index")
+                        if isinstance(idx, int) and idx in cctape_tool_blocks:
+                            cctape_tool_blocks[idx]["input"] += delta.get(
+                                "partial_json", ""
+                            )
+                elif event.event == "content_block_stop":
+                    idx = int(json.loads(event.data)["index"])
+                    pending = cctape_tool_blocks.pop(idx, None)
+                    if pending is not None and session_id:
+                        short = pending["name"].split("__", 2)[-1]
+                        try:
+                            arguments = json.loads(pending["input"] or "{}")
+                        except ValueError:
+                            return
+                        mcp_caller.record(short, arguments, session_id)
+            except (ValueError, KeyError, TypeError):
+                return
+
+        # Buffer straddling chunks and extract complete lines between
+        # newlines. SSEDecoder expects one line at a time, with line
+        # terminators already stripped — empty strings ARE meaningful
+        # (they signal end-of-event), so we must only feed empty strings
+        # that were real blank lines in the stream, not trailing artifacts
+        # of splitting on "\n".
+        line_buf = ""
         try:
             async for chunk in upstream.aiter_bytes():
+                # Record tool_use blocks BEFORE yielding so the MCP call
+                # (triggered the moment the client sees content_block_stop)
+                # can look up its caller.
+                try:
+                    line_buf += chunk.decode("utf-8", errors="replace")
+                    # split -> all elements except the last are complete
+                    # lines (the last is a possibly-partial tail).
+                    parts = line_buf.split("\n")
+                    line_buf = parts[-1]
+                    for line in parts[:-1]:
+                        _feed_line(line)
+                except Exception:
+                    pass
                 yield chunk
                 chunks.append(chunk)
+            # Flush any residual line (no trailing newline was seen).
+            if line_buf:
+                try:
+                    _feed_line(line_buf)
+                except Exception:
+                    pass
         finally:
             await upstream.aclose()
 
-            # Parse the response and usage.
+            # Parse the response and usage. (Tool-use tracking already ran
+            # inline above; this block handles usage/model/title extraction.)
             payload = b"".join(chunks)
             text = payload.decode()
             usage = {}
@@ -173,10 +254,50 @@ async def _post_messages(request: Request):
                 elif event.event == "message_delta":
                     data = json.loads(event.data)
                     usage = data["usage"]
-                elif is_title_request and event.event == "content_block_delta":
-                    delta = json.loads(event.data).get("delta", {})
-                    if delta.get("type") == "text_delta":
+                elif event.event == "content_block_start":
+                    try:
+                        data = json.loads(event.data)
+                        block = data.get("content_block") or {}
+                        if block.get("type") == "tool_use":
+                            name = block.get("name") or ""
+                            if name.startswith("mcp__cctape__"):
+                                cctape_tool_blocks[int(data["index"])] = {
+                                    "name": name,
+                                    "input": "",
+                                }
+                    except (ValueError, KeyError, TypeError):
+                        pass
+                elif event.event == "content_block_delta":
+                    delta_data = None
+                    try:
+                        delta_data = json.loads(event.data)
+                    except ValueError:
+                        pass
+                    delta = (delta_data or {}).get("delta") or {}
+                    if is_title_request and delta.get("type") == "text_delta":
                         title_text += delta.get("text", "")
+                    elif delta.get("type") == "input_json_delta":
+                        idx = (delta_data or {}).get("index")
+                        if isinstance(idx, int) and idx in cctape_tool_blocks:
+                            cctape_tool_blocks[idx]["input"] += delta.get(
+                                "partial_json", ""
+                            )
+                elif event.event == "content_block_stop":
+                    try:
+                        idx = int(json.loads(event.data)["index"])
+                    except (ValueError, KeyError, TypeError):
+                        idx = -1
+                    pending = cctape_tool_blocks.pop(idx, None)
+                    if pending is not None and session_id:
+                        # Strip the "mcp__<server>__" prefix so the name the
+                        # MCP handler sees ("search_transcripts") matches.
+                        short = pending["name"].split("__", 2)[-1]
+                        try:
+                            arguments = json.loads(pending["input"] or "{}")
+                        except ValueError:
+                            arguments = None
+                        if arguments is not None:
+                            mcp_caller.record(short, arguments, session_id)
 
             # Persist the generated title against the session row. The session
             # row may not exist yet — ensure_session_known only inserts once

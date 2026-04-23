@@ -222,8 +222,13 @@ def _to_fts_query(query: str) -> str:
     NOT). Rather than teaching users that grammar, split the input on
     whitespace and wrap each word in double quotes so every token is a
     literal. Each token gets a trailing `*` so it matches as a prefix —
-    searching "ide_diagnostic" should find "ide_diagnostics" too. Multiple
-    tokens are ANDed implicitly.
+    searching "ide_diagnostic" should find "ide_diagnostics" too.
+
+    Tokens are OR'd: a blob matches if ANY token appears. bm25 then ranks
+    multi-token hits above single-token hits, so a precise query still
+    surfaces its best match first — but broader queries ("stale hung
+    process debug") no longer silently return empty just because no single
+    blob contains every word.
     """
     tokens = []
     for word in query.split():
@@ -232,7 +237,7 @@ def _to_fts_query(query: str) -> str:
         cleaned = word.replace('"', "").strip()
         if cleaned:
             tokens.append(f'"{cleaned}"*')
-    return " ".join(tokens)
+    return " OR ".join(tokens)
 
 
 _SNIPPET_CONTEXT_CHARS = 60

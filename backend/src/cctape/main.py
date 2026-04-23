@@ -1,9 +1,10 @@
 import argparse
+import logging
 import os
 import sqlite3
 import threading
 import webbrowser
-from contextlib import asynccontextmanager, closing
+from contextlib import AsyncExitStack, asynccontextmanager, closing
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +18,15 @@ from .fts import backfill as fts_backfill
 from .fts import ensure_schema as fts_ensure_schema
 from .proxy import router as proxy_router
 from .sessions import sync_all as sync_sessions
+
+# Defensive import: the MCP server is a new feature and must not be able to
+# prevent the proxy from coming up. If the `mcp` package is broken at import
+# time we log and continue without the MCP mount.
+try:
+    from .mcp_server import build_mcp as _build_mcp
+except Exception:  # noqa: BLE001
+    logging.getLogger(__name__).exception("MCP import failed; continuing without MCP")
+    _build_mcp = None  # type: ignore[assignment]
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -116,11 +126,22 @@ async def lifespan(app: FastAPI):
                 fts_ensure_schema(conn)
                 fts_backfill(conn)
             except Exception:
-                import logging
-
                 logging.getLogger(__name__).exception("FTS setup failed")
             sync_sessions(conn)
-            yield
+
+            # Enter the MCP sub-app's lifespan so its streamable-HTTP session
+            # manager is initialized. Swallow any failure — per the proxy
+            # deadlock rule, MCP must not prevent the proxy from coming up.
+            async with AsyncExitStack() as stack:
+                mcp_app = getattr(app.state, "mcp_app", None)
+                if mcp_app is not None:
+                    try:
+                        await stack.enter_async_context(
+                            mcp_app.router.lifespan_context(mcp_app)
+                        )
+                    except Exception:
+                        logging.getLogger(__name__).exception("MCP lifespan failed")
+                yield
 
 
 def create_app() -> FastAPI:
@@ -145,6 +166,34 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
     app.include_router(proxy_router)
+
+    # Mount the MCP server at /mcp BEFORE the static catch-all at "/" so its
+    # routes win. Built defensively — if construction fails, we log and skip
+    # the mount (per the proxy deadlock rule in CLAUDE.md).
+    #
+    # Starlette's mount matches `/mcp/<rest>` but NOT the bare `/mcp` (without
+    # trailing slash). MCP clients commonly use `/mcp` with no slash, so we
+    # add a small redirect route. The mount itself serves `/mcp/` (the real
+    # streamable-HTTP endpoint).
+    if _build_mcp is not None:
+        try:
+            _, mcp_app = _build_mcp(lambda: app.state.conn)
+            app.state.mcp_app = mcp_app
+            app.mount("/mcp", mcp_app)
+
+            from starlette.responses import RedirectResponse
+
+            @app.api_route(
+                "/mcp",
+                methods=["GET", "POST", "DELETE"],
+                include_in_schema=False,
+            )
+            async def _mcp_trailing_redirect() -> RedirectResponse:
+                # 308 preserves method + body, which matters for POST initialize.
+                return RedirectResponse(url="/mcp/", status_code=308)
+        except Exception:
+            logging.getLogger(__name__).exception("MCP mount failed")
+
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app
