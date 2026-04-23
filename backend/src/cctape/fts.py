@@ -221,7 +221,9 @@ def _to_fts_query(query: str) -> str:
     FTS5 treats many characters as operators (-, :, quotes, parens, AND, OR,
     NOT). Rather than teaching users that grammar, split the input on
     whitespace and wrap each word in double quotes so every token is a
-    literal. Multiple quoted tokens are ANDed implicitly.
+    literal. Each token gets a trailing `*` so it matches as a prefix —
+    searching "ide_diagnostic" should find "ide_diagnostics" too. Multiple
+    tokens are ANDed implicitly.
     """
     tokens = []
     for word in query.split():
@@ -229,7 +231,7 @@ def _to_fts_query(query: str) -> str:
         # character is fine inside a quoted FTS5 string.
         cleaned = word.replace('"', "").strip()
         if cleaned:
-            tokens.append(f'"{cleaned}"')
+            tokens.append(f'"{cleaned}"*')
     return " ".join(tokens)
 
 
