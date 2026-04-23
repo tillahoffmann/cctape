@@ -1,5 +1,8 @@
 # cctape
 
+[![PyPI version](https://img.shields.io/pypi/v/cctape.svg)](https://pypi.org/project/cctape/)
+[![CI](https://github.com/tillahoffmann/cctape/actions/workflows/main.yaml/badge.svg)](https://github.com/tillahoffmann/cctape/actions/workflows/main.yaml)
+
 A local proxy for Claude Code that archives every request and response to a SQLite database, with a web UI for browsing sessions, searching transcripts, inspecting raw API traffic, and tracking token usage and cost.
 
 ## Quick start
