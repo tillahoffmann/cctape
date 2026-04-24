@@ -6,7 +6,7 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from httpx_sse._decoders import SSEDecoder
 
 from . import mcp_caller
@@ -139,7 +139,13 @@ async def _post_messages(request: Request):
     upstream_req = client.build_request(
         "POST", url, headers=request_headers, content=request.stream()
     )
-    upstream = await client.send(upstream_req, stream=True)
+    try:
+        upstream = await client.send(upstream_req, stream=True)
+    except httpx.RequestError as exc:
+        return PlainTextResponse(
+            f"upstream request failed: {exc.__class__.__name__}",
+            status_code=502,
+        )
 
     async def body():
         chunks = []

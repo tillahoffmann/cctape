@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Generator
 from unittest.mock import patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
@@ -106,3 +107,17 @@ def test_post_message(client: TestClient, cctape_db: Path, compress: bool) -> No
         assert cache_5m == 0
         assert cache_1h == 42103
         assert b"is there something" in decompress(payload)
+
+
+def test_post_message_upstream_read_error_returns_502(client: TestClient) -> None:
+    async def _send(*args, **kwargs):
+        raise httpx.ReadError("upstream closed connection")
+
+    sample_request = (ROOT / "sample_request.json").read_text()
+    with patch("httpx._client.AsyncClient.send", side_effect=_send):
+        response = client.post(
+            "/proxy/v1/messages",
+            content=sample_request,
+            headers={"x-claude-code-session-id": "testing-session-502"},
+        )
+    assert response.status_code == 502
