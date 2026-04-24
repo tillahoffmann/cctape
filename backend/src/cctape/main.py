@@ -11,7 +11,8 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import FileResponse, Response
 
 from .api import router as api_router
 from .fts import backfill as fts_backfill
@@ -196,6 +197,26 @@ def create_app() -> FastAPI:
 
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+
+        # SPA fallback: React Router owns client-side routes like /setup and
+        # /sessions/<id>. StaticFiles only serves index.html at exactly "/",
+        # so a direct hit to a deep link 404s. Rewrite those 404s to index.html.
+        # Real backend routes (/api, /proxy, /mcp) keep their own 404s.
+        @app.exception_handler(StarletteHTTPException)
+        async def _spa_fallback(
+            request: Request, exc: StarletteHTTPException
+        ) -> Response:
+            path = request.url.path
+            if (
+                exc.status_code == 404
+                and request.method == "GET"
+                and not path.startswith(("/api", "/proxy", "/mcp", "/assets"))
+            ):
+                index = STATIC_DIR / "index.html"
+                if index.is_file():
+                    return FileResponse(index)
+            return Response(exc.detail or "", status_code=exc.status_code)
+
     return app
 
 
