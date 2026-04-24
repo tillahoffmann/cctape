@@ -42,29 +42,33 @@ export default function Setup() {
 
   const proxyUrl =
     config?.anthropic_base_url ?? `${window.location.origin}/proxy`
+  const mcpUrl = proxyUrl.replace(/\/proxy\/?$/, '/mcp')
   const envExport = `export ANTHROPIC_BASE_URL=${proxyUrl}`
   const vscodeSnippet = `"claudeCode.environmentVariables": [
     {"name": "ANTHROPIC_BASE_URL", "value": "${proxyUrl}"}
 ]`
+  const mcpAdd = `claude mcp add --transport http cctape ${mcpUrl}`
 
   return (
     <div className="flex flex-col gap-6 max-w-3xl mx-auto py-4">
       <div className="flex flex-col items-center gap-3 text-center">
-        <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-          <CassetteTape className="h-6 w-6 text-primary" />
-        </div>
-        <h1 className="text-2xl font-bold tracking-tight">Welcome to cctape</h1>
+        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">
+          <span className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+            <CassetteTape className="h-5 w-5 text-primary" />
+          </span>
+          Welcome to cctape
+        </h1>
         <p className="text-muted-foreground max-w-lg">
-          cctape is a local proxy that records every Claude Code request and
-          response to a SQLite database, so you can browse sessions, search
-          transcripts, and track token usage and cost.
+          cctape is a proxy that records every Claude Code request and
+          response to a local database—so you can browse and search sessions, track token usage, and let Claude search its
+          own history over MCP.
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Get started</CardTitle>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-sm">
             Point Claude Code at this proxy. Pick whichever setup matches how
             you run Claude Code.
           </p>
@@ -86,14 +90,23 @@ export default function Setup() {
             <CodeBlock code={vscodeSnippet} />
           </Step>
 
-          <Step n={3} title="Verify">
+          <Step n={3} title="MCP server (optional)">
+            <p className="text-muted-foreground text-sm">
+              Let Claude search its own history. Register the MCP server with
+              the <span className="font-mono">claude</span> CLI so the agent
+              can look up past sessions instead of re-deriving context you
+              already paid for.
+            </p>
+            <CodeBlock code={mcpAdd} />
+          </Step>
+
+          <Step n={4} title="Verify">
             <p className="text-muted-foreground text-sm">
               Run <span className="font-mono">claude</span> and ask it
-              something. A new session should appear on{' '}
+              something, and a new session will appear on{' '}
               <Link to="/sessions" className="underline">
                 the sessions page
-              </Link>{' '}
-              within a few seconds.
+              </Link>{' '}.
             </p>
             {hasSessions === true && (
               <div className="text-sm rounded-md border border-primary/30 bg-primary/5 px-3 py-2">

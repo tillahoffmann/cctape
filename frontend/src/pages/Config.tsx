@@ -80,7 +80,7 @@ export default function Config() {
       <Card>
         <CardHeader>
           <SectionTitle icon={Terminal}>Terminal setup</SectionTitle>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-sm">
             Record sessions from the{' '}
             <span className="font-mono">claude</span> CLI — add the env var
             to <span className="font-mono">~/.zshrc</span> or{' '}
@@ -96,7 +96,7 @@ export default function Config() {
       <Card>
         <CardHeader>
           <SectionTitle icon={Code2}>VS Code setup</SectionTitle>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-sm">
             Record sessions from the Claude Code VS Code extension — add the
             env var to user <span className="font-mono">settings.json</span>.
           </p>
@@ -109,7 +109,7 @@ export default function Config() {
       <Card>
         <CardHeader>
           <SectionTitle icon={Plug}>MCP setup</SectionTitle>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-sm">
             Let Claude Code search its own archive — register the MCP server
             at <span className="font-mono">{mcpUrl}</span> with the{' '}
             <span className="font-mono">claude</span> CLI. Exposes{' '}
@@ -125,7 +125,7 @@ export default function Config() {
       <Card>
         <CardHeader>
           <SectionTitle icon={DollarSign}>Pricing</SectionTitle>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-sm">
             Rates used to compute session costs — USD per million tokens,
             hardcoded and updated manually from anthropic.com/pricing.
           </p>
@@ -164,7 +164,7 @@ export default function Config() {
       <Card>
         <CardHeader>
           <SectionTitle icon={Info}>About</SectionTitle>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-sm">
             Runtime details for this cctape instance — version and paths.
           </p>
         </CardHeader>
