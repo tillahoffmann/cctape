@@ -4,7 +4,6 @@ import {
   Legend,
   Line,
   LineChart,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -247,23 +246,6 @@ export default function Usage() {
     const resets5h = uniqueSorted((r) => r.unified_5h_reset)
     const resets7d = uniqueSorted((r) => r.unified_7d_reset)
 
-    // Split each line at reset boundaries by inserting null entries. Recharts
-    // treats null y-values as gaps, breaking the stroke without connecting
-    // across the reset. Only resets inside the data range are inserted so the
-    // line's data doesn't widen the x-axis past the real points.
-    const buildSeries = (resets: number[]): Point[] => {
-      const merged: Point[] = points.slice()
-      for (const t of resets) {
-        if (t >= tMin && t <= tMax) {
-          merged.push({ t, unified_5h_utilization: null, unified_7d_utilization: null })
-        }
-      }
-      merged.sort((a, b) => a.t - b.t)
-      return merged
-    }
-    const data5h = buildSeries(resets5h)
-    const data7d = buildSeries(resets7d)
-
     const tickDates = records.length
       ? scaleTime().domain([tMin, tMax]).ticks(7)
       : []
@@ -280,8 +262,6 @@ export default function Usage() {
       points,
       resets5h,
       resets7d,
-      data5h,
-      data7d,
       tMin,
       tMax,
       ticks,
@@ -302,8 +282,6 @@ export default function Usage() {
     points,
     resets5h,
     resets7d,
-    data5h,
-    data7d,
     tMin,
     tMax,
     ticks,
@@ -312,8 +290,6 @@ export default function Usage() {
 
   const nextReset5h = resets5h.find((t) => t > now) ?? null
   const nextReset7d = resets7d.find((t) => t > now) ?? null
-  const pastResets5h = resets5h.filter((t) => t >= tMin && t <= tMax && t <= now)
-  const pastResets7d = resets7d.filter((t) => t >= tMin && t <= tMax && t <= now)
   const fmtAbs = (t: number) => {
     const d = new Date(t)
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
@@ -415,43 +391,23 @@ export default function Usage() {
                 <Tooltip content={UsageTooltip} isAnimationActive={false} />
                 <Legend />
                 <Line
-                  data={data5h}
+                  data={points}
                   type="stepAfter"
                   dataKey="unified_5h_utilization"
                   name="5h"
                   stroke="var(--color-chart-1)"
                   dot={false}
-                  connectNulls={false}
                   isAnimationActive={false}
                 />
                 <Line
-                  data={data7d}
+                  data={points}
                   type="stepAfter"
                   dataKey="unified_7d_utilization"
                   name="7d"
                   stroke="var(--color-chart-2)"
                   dot={false}
-                  connectNulls={false}
                   isAnimationActive={false}
                 />
-                {pastResets5h.map((t) => (
-                  <ReferenceLine
-                    key={`r5-${t}`}
-                    x={t}
-                    stroke="var(--color-chart-1)"
-                    strokeDasharray="2 2"
-                    strokeOpacity={0.5}
-                  />
-                ))}
-                {pastResets7d.map((t) => (
-                  <ReferenceLine
-                    key={`r7-${t}`}
-                    x={t}
-                    stroke="var(--color-chart-2)"
-                    strokeDasharray="2 2"
-                    strokeOpacity={0.5}
-                  />
-                ))}
               </LineChart>
             </ResponsiveContainer>
           </div>
