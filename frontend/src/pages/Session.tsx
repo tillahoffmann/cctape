@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useMemo } from 'react'
+import { useCallback, useState, useEffect, useMemo, type MouseEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -411,13 +411,25 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
     }
   }
 
+  const anchorId = `msg-${turn.request.id}`
+  const handleAnchorClick = (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    window.history.replaceState(null, '', `#${anchorId}`)
+    document.getElementById(anchorId)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
   return (
-    <div id={`msg-${turn.request.id}`} data-turn-id={turn.request.id} className="space-y-3 scroll-mt-20">
+    <div id={anchorId} data-turn-id={turn.request.id} className="space-y-3 scroll-mt-20">
       {showUser && (
         <div className="flex justify-end">
           <div className="max-w-[80%] space-y-2">
             <div className="flex items-center gap-3 text-xs text-muted-foreground justify-end">
-              <LiveTimestamp iso={turn.request.timestamp} />
+              <a
+                href={`#${anchorId}`}
+                onClick={handleAnchorClick}
+                className="hover:underline hover:text-foreground"
+              >
+                <LiveTimestamp iso={turn.request.timestamp} />
+              </a>
               <CopyButton text={textFromBlocks(visibleUserBlocks)} />
             </div>
             <Card>
@@ -431,7 +443,13 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
       {turn.response && (
         <div className="space-y-2 max-w-[80%] mr-auto">
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span><LiveTimestamp iso={turn.response.timestamp} /></span>
+            <a
+              href={`#${anchorId}`}
+              onClick={handleAnchorClick}
+              className="hover:underline hover:text-foreground"
+            >
+              <LiveTimestamp iso={turn.response.timestamp} />
+            </a>
             <ViewModeToggle mode={mode} onChange={setMode} />
             <CopyButton text={textFromBlocks(parsed.blocks)} />
           </div>
