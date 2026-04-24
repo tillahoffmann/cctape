@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Browser frame screenshot tool</title>
+<style>
+  :root {
+    --bg-1: #ff9a8b;
+    --bg-2: #a18cd1;
+    --bg-3: #8ec5fc;
+    --chrome-bg: #e8e8ea;
+    --chrome-border: #d1d1d4;
+    --addr-bg: #ffffff;
+    --addr-text: #4a4a4a;
+    --radius: 12px;
+    --pad: 80px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    background: linear-gradient(135deg, var(--bg-1), var(--bg-2), var(--bg-3));
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--pad);
+  }
+  #stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .browser {
+    width: var(--card-width, 1200px);
+    max-width: 100%;
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow:
+      0 30px 60px -15px rgba(0,0,0,0.35),
+      0 10px 20px -10px rgba(0,0,0,0.25);
+    background: #fff;
+  }
+  .chrome {
+    background: var(--chrome-bg);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: background 120ms ease;
+  }
+  .lights { display: flex; gap: 6px; flex-shrink: 0; }
+  .light {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.15);
+  }
+  .light.red    { background: #ff5f57; }
+  .light.yellow { background: #febc2e; }
+  .light.green  { background: #28c840; }
+  .addr {
+    flex: 1;
+    background: var(--addr-bg);
+    color: var(--addr-text);
+    font-size: 12px;
+    line-height: 1;
+    padding: 7px 12px;
+    border-radius: 6px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+  .content img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .drop-hint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 14px;
+  }
+  .content {
+    position: relative;
+    width: 100%;
+    aspect-ratio: var(--content-aspect, 16 / 10);
+    background: transparent;
+  }
+  .content.has-image {
+    aspect-ratio: auto;
+  }
+  #download {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+  #download:hover { background: rgba(0,0,0,0.85); }
+  #download:disabled { opacity: 0.4; cursor: not-allowed; }
+  body.dragging::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    border: 3px dashed rgba(255,255,255,0.8);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="browser" id="browser">
+    <div class="chrome">
+      <div class="lights">
+        <div class="light red"></div>
+        <div class="light yellow"></div>
+        <div class="light green"></div>
+      </div>
+    </div>
+    <div class="content" id="content">
+      <div class="drop-hint">Drop an image anywhere on the page</div>
+    </div>
+  </div>
+</div>
+<button id="download" disabled>Download PNG</button>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script>
+  const content = document.getElementById('content');
+  const chrome = document.querySelector('.chrome');
+  const browser = document.getElementById('browser');
+  const stage = document.getElementById('stage');
+
+  let currentAspect = 16 / 10;
+
+  function fit() {
+    const pad = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
+    const availH = window.innerHeight - 2 * pad;
+    const availW = window.innerWidth - 2 * pad;
+    const chromeH = chrome.getBoundingClientRect().height;
+    const maxContentH = availH - chromeH;
+    const widthByHeight = maxContentH * currentAspect;
+    const width = Math.min(availW, widthByHeight, 1600);
+    browser.style.setProperty('--card-width', width + 'px');
+  }
+
+  window.addEventListener('resize', fit);
+  window.addEventListener('load', fit);
+  fit();
+
+  function sampleTopLeft(img) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, 1, 1, 0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    return `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+  }
+
+  function render(src) {
+    content.innerHTML = '';
+    content.classList.add('has-image');
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const color = sampleTopLeft(img);
+        chrome.style.background = color;
+        browser.style.background = color;
+      } catch (e) {}
+      currentAspect = img.naturalWidth / img.naturalHeight;
+      fit();
+      document.getElementById('download').disabled = false;
+    };
+    img.src = src;
+    content.appendChild(img);
+  }
+
+  window.addEventListener('dragover', e => {
+    e.preventDefault();
+    document.body.classList.add('dragging');
+  });
+  window.addEventListener('dragleave', e => {
+    if (e.target === document.documentElement) {
+      document.body.classList.remove('dragging');
+    }
+  });
+  window.addEventListener('drop', e => {
+    e.preventDefault();
+    document.body.classList.remove('dragging');
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = () => render(reader.result);
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('download').addEventListener('click', async () => {
+    const btn = document.getElementById('download');
+    btn.disabled = true;
+    btn.textContent = 'Rendering...';
+    try {
+      const canvas = await html2canvas(browser, {
+        backgroundColor: null,
+        scale: 2,
+        useCORS: true,
+      });
+      const link = document.createElement('a');
+      link.download = 'screenshot.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Download PNG';
+    }
+  });
+
+  window.addEventListener('paste', e => {
+    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+    if (!item) return;
+    const file = item.getAsFile();
+    const reader = new FileReader();
+    reader.onload = () => render(reader.result);
+    reader.readAsDataURL(file);
+  });
+</script>
+</body>
+</html>

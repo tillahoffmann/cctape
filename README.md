@@ -5,7 +5,7 @@
 
 A local proxy for Claude Code that archives every request and response, with a web UI for browsing sessions, searching transcripts, inspecting raw API traffic, tracking token usage and cost, and an MCP server for Claude to inspect past sessions.
 
-![](https://raw.githubusercontent.com/tillahoffmann/cctape/main/screenshot.png)
+![](https://raw.githubusercontent.com/tillahoffmann/cctape/main/screenshot.gif)
 
 ## Features
 
