@@ -8,3 +8,4 @@ DerivedData/
 xcuserdata/
 *.swp
 .DS_Store
+buildServer.json

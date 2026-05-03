@@ -13,3 +13,4 @@ node_modules/
 backend/src/cctape/static/
 backend/README.md
 playground/
+.claude/settings.local.json

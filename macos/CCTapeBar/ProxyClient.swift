@@ -53,6 +53,10 @@ struct ProxyClient {
 		try await get("/api/accounts")
 	}
 
+	func sessions() async throws -> [SessionSummary] {
+		try await get("/api/sessions")
+	}
+
 	func usage(days: Int, accountId: String?) async throws -> [UsageRecord] {
 		var q = [URLQueryItem(name: "days", value: String(days))]
 		if let a = accountId {

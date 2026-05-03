@@ -20,6 +20,23 @@ struct AccountSummary: Decodable, Identifiable, Hashable {
 	var id: String { account_id }
 }
 
+struct SessionSummary: Decodable, Identifiable, Hashable {
+	let session_id: String
+	let last_timestamp: String
+	let turn_count: Int
+	let cost_usd: Double?
+	let first_message_preview: String?
+	let title: String?
+
+	var id: String { session_id }
+
+	var displayName: String {
+		if let t = title, !t.isEmpty { return t }
+		if let p = first_message_preview, !p.isEmpty { return String(p.prefix(40)) }
+		return String(session_id.prefix(8))
+	}
+}
+
 struct UsageRecord: Decodable {
 	let timestamp: String
 	let unified_5h_utilization: Double?

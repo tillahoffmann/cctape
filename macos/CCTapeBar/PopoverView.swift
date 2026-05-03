@@ -108,6 +108,30 @@ struct PopoverView: View {
 	private var accountSummary: some View {
 		if let acc = state.selectedAccount {
 			VStack(alignment: .leading, spacing: 4) {
+				HStack {
+					Text("Session")
+						.foregroundStyle(.secondary)
+					Spacer()
+					Picker(
+						"",
+						selection: Binding(
+							get: { state.selectedSessionId ?? "" },
+							set: { state.selectedSessionId = $0.isEmpty ? nil : $0 }
+						)
+					) {
+						ForEach(state.sessions.prefix(20)) { s in
+							Text(s.displayName).tag(s.session_id)
+						}
+					}
+					.labelsHidden()
+					.pickerStyle(.menu)
+					.frame(maxWidth: 180)
+				}
+				if let sess = state.selectedSession {
+					row("Cost", formatCost(sess.cost_usd))
+					row("Turns", formatInt(sess.turn_count))
+				}
+				Divider().padding(.vertical, 2)
 				row("Cumulative cost", formatCost(acc.cost_usd))
 				row("Messages", formatInt(acc.message_count))
 			}
@@ -143,6 +167,12 @@ struct PopoverView: View {
 		VStack(alignment: .leading, spacing: 4) {
 			actionButton(title: "Open Dashboard", systemImage: "safari") {
 				state.openDashboard()
+			}
+
+			actionButton(title: "Copy export command", systemImage: "doc.on.clipboard") {
+				let cmd = "export ANTHROPIC_BASE_URL=\(Settings.baseURL.absoluteString)/proxy"
+				NSPasteboard.general.clearContents()
+				NSPasteboard.general.setString(cmd, forType: .string)
 			}
 
 			if state.connection == .connected && state.isProxyManagedByUs {

@@ -4,12 +4,14 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clock,
+  DatabaseZap,
   DollarSign,
   Folder,
   Gauge,
   GitBranch,
   MessagesSquare,
   Search,
+  Zap,
 } from 'lucide-react'
 import { api, type SearchHit, type SessionSummary } from '../lib/api'
 import { formatCost } from '../lib/formatCost'
@@ -96,6 +98,8 @@ function SessionCard({
   outputTokens,
   peakContextTokens,
   costUsd,
+  cacheReadTokens,
+  cacheCreationTokens,
   snippet,
   hitCount,
   onTitleChange,
@@ -110,6 +114,8 @@ function SessionCard({
   outputTokens?: number | null
   peakContextTokens?: number | null
   costUsd?: number | null
+  cacheReadTokens?: number | null
+  cacheCreationTokens?: number | null
   snippet?: string
   hitCount?: number
   onTitleChange: (next: string | null) => Promise<void>
@@ -163,6 +169,16 @@ function SessionCard({
           {outputTokens !== undefined && (
             <MetaItem icon={ArrowUpFromLine}>
               <span className="tabular-nums">{formatTokens(outputTokens)}</span> out
+            </MetaItem>
+          )}
+          {cacheReadTokens != null && cacheReadTokens > 0 && (
+            <MetaItem icon={Zap}>
+              <span className="tabular-nums">{formatTokens(cacheReadTokens)}</span> cache-read
+            </MetaItem>
+          )}
+          {cacheCreationTokens != null && cacheCreationTokens > 0 && (
+            <MetaItem icon={DatabaseZap}>
+              <span className="tabular-nums">{formatTokens(cacheCreationTokens)}</span> cache-write
             </MetaItem>
           )}
           {peakContextTokens !== undefined && (
@@ -318,6 +334,8 @@ export default function Sessions() {
                     outputTokens={s?.output_tokens}
                     peakContextTokens={s?.peak_context_tokens}
                     costUsd={s?.cost_usd}
+                    cacheReadTokens={s?.cache_read_input_tokens}
+                    cacheCreationTokens={s?.cache_creation_input_tokens}
                     snippet={h.snippet}
                     hitCount={h.hit_count}
                     onTitleChange={(next) => updateTitle(h.session_id, next)}
@@ -343,6 +361,8 @@ export default function Sessions() {
               outputTokens={s.output_tokens}
               peakContextTokens={s.peak_context_tokens}
               costUsd={s.cost_usd}
+              cacheReadTokens={s.cache_read_input_tokens}
+              cacheCreationTokens={s.cache_creation_input_tokens}
               onTitleChange={(next) => updateTitle(s.session_id, next)}
             />
           ))}

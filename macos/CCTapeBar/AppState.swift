@@ -23,6 +23,8 @@ final class AppState {
 	var latest7dUtilization: Double?
 	var next5hReset: Date?
 	var next7dReset: Date?
+	var sessions: [SessionSummary] = []
+	var selectedSessionId: String?
 	var lastError: String?
 
 	private let client = ProxyClient()
@@ -60,6 +62,16 @@ final class AppState {
 		pollingTask = Task { [weak self] in
 			await self?.pollLoop()
 		}
+		// Auto-start the proxy on launch if it isn't already reachable.
+		Task { [weak self] in
+			guard let self else { return }
+			do {
+				_ = try await client.config()
+				// Already reachable — the poll loop will pick it up.
+			} catch {
+				await self.startProxy()
+			}
+		}
 	}
 
 	private func pollLoop() async {
@@ -84,6 +96,7 @@ final class AppState {
 
 			if ticks % 2 == 0 {
 				await refreshAccounts()
+				await refreshSessions()
 			}
 			await refreshUsage()
 			ticks += 1
@@ -135,6 +148,21 @@ final class AppState {
 		}
 	}
 
+	func refreshSessions() async {
+		guard connection == .connected else { return }
+		do {
+			let list = try await client.sessions()
+			sessions = list
+			if let id = selectedSessionId, !list.contains(where: { $0.session_id == id }) {
+				selectedSessionId = list.first?.session_id
+			} else if selectedSessionId == nil {
+				selectedSessionId = list.first?.session_id
+			}
+		} catch {
+			lastError = "sessions: \(error)"
+		}
+	}
+
 	func refreshAccounts() async {
 		guard connection == .connected else { return }
 		do {
@@ -155,6 +183,11 @@ final class AppState {
 		return accounts.first(where: { $0.account_id == id })
 	}
 
+	var selectedSession: SessionSummary? {
+		guard let id = selectedSessionId else { return nil }
+		return sessions.first(where: { $0.session_id == id })
+	}
+
 	func startProxy() async {
 		do {
 			try proxy.start()
@@ -163,6 +196,7 @@ final class AppState {
 					_ = try await client.config()
 					connection = .connected
 					await refreshAccounts()
+					await refreshSessions()
 					await refreshUsage()
 					return
 				} catch {
