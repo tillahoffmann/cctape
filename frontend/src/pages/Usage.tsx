@@ -15,13 +15,16 @@ import { Popover as PopoverPrimitive } from 'radix-ui'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  AlertCircle,
   Check,
   ChevronsUpDown,
   Clock,
+  DatabaseZap,
   DollarSign,
   MessagesSquare,
+  Zap,
 } from 'lucide-react'
-import { api, type AccountSummary, type UsageRecord } from '../lib/api'
+import { api, type AccountSummary, type ExtraUsageSummary, type UsageRecord } from '../lib/api'
 import { formatCost } from '../lib/formatCost'
 import { useAutoRefresh } from '../lib/useAutoRefresh'
 import { useNow } from '../lib/useNow'
@@ -101,6 +104,24 @@ function AccountOption({
           </span>{' '}
           out
         </span>
+        {account.cache_read_input_tokens != null && account.cache_read_input_tokens > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <Zap className="h-3.5 w-3.5" />
+            <span className="tabular-nums">
+              {formatCompact(account.cache_read_input_tokens)}
+            </span>{' '}
+            cache-read
+          </span>
+        )}
+        {account.cache_creation_input_tokens != null && account.cache_creation_input_tokens > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <DatabaseZap className="h-3.5 w-3.5" />
+            <span className="tabular-nums">
+              {formatCompact(account.cache_creation_input_tokens)}
+            </span>{' '}
+            cache-write
+          </span>
+        )}
         <span className="inline-flex items-center gap-1">
           <DollarSign className="h-3.5 w-3.5" />
           <span className="tabular-nums">{formatCost(account.cost_usd)}</span>
@@ -212,7 +233,14 @@ export default function Usage() {
     [days, selectedAccountId],
   )
 
-  const error = accountsError ?? recordsError
+  const { data: extraUsage, error: extraUsageError } = useAutoRefresh<
+    ExtraUsageSummary | null
+  >(
+    () => (selectedAccountId ? api.extraUsage(days, selectedAccountId) : Promise.resolve(null)),
+    [days, selectedAccountId],
+  )
+
+  const error = accountsError ?? recordsError ?? extraUsageError
 
   const derived = useMemo(() => {
     if (!records) return null
@@ -349,18 +377,31 @@ export default function Usage() {
             onChange={setSelectedAccountId}
           />
         </div>
-        <div className="text-muted-foreground flex flex-col items-end text-xs leading-tight">
-          <div>
-            Next 5h reset:{' '}
-            <span className="text-foreground">
-              {nextReset5h ? fmtAbs(nextReset5h) : '—'}
-            </span>
-          </div>
-          <div>
-            Next 7d reset:{' '}
-            <span className="text-foreground">
-              {nextReset7d ? fmtAbs(nextReset7d) : '—'}
-            </span>
+        <div className="flex flex-col items-end gap-2">
+          {extraUsage && extraUsage.message_count > 0 && (
+            <div className="bg-destructive/10 text-destructive flex items-center gap-2 rounded-lg border border-destructive/20 px-3 py-1.5 text-xs">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="font-medium">
+                Extra usage:{' '}
+                <span className="tabular-nums">
+                  {formatCost(extraUsage.total_cost_usd)} ({extraUsage.message_count} requests)
+                </span>
+              </span>
+            </div>
+          )}
+          <div className="text-muted-foreground flex flex-col items-end text-xs leading-tight">
+            <div>
+              Next 5h reset:{' '}
+              <span className="text-foreground">
+                {nextReset5h ? fmtAbs(nextReset5h) : '—'}
+              </span>
+            </div>
+            <div>
+              Next 7d reset:{' '}
+              <span className="text-foreground">
+                {nextReset7d ? fmtAbs(nextReset7d) : '—'}
+              </span>
+            </div>
           </div>
         </div>
       </CardHeader>

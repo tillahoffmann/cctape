@@ -1,0 +1,41 @@
+name: CCTapeBar
+options:
+  bundleIdPrefix: com.cctape
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_HARDENED_RUNTIME: NO
+    DEAD_CODE_STRIPPING: YES
+targets:
+  CCTapeBar:
+    type: application
+    platform: macOS
+    sources:
+      - path: CCTapeBar
+        excludes:
+          - Info.plist
+    info:
+      path: CCTapeBar/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleName: cctape bar
+        CFBundleDisplayName: cctape bar
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSHumanReadableCopyright: ""
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cctape.menubar
+        PRODUCT_NAME: CCTapeBar
+        ENABLE_APP_SANDBOX: NO
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO

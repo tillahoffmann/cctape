@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from .fts import search_sessions
 from .pricing import PRICING, cost
 from .storage import decompress, first_message, reconstruct_payload
-from .util import iter_records
 
 router = APIRouter(prefix="/api")
 
@@ -24,6 +23,8 @@ class UsageRecord(BaseModel):
     unified_7d_utilization: float | None
     unified_5h_reset: datetime | None
     unified_7d_reset: datetime | None
+    cost_usd: float | None
+    is_extra_usage: bool
 
 
 class AccountSummary(BaseModel):
@@ -153,30 +154,172 @@ async def _get_usage(
     if account_id is not None:
         account_clause = " AND account_id = :account_id"
         params["account_id"] = account_id
-    return list(
-        iter_records(
-            conn.execute(
-                f"""
-                SELECT
-                    timestamp,
-                    input_tokens,
-                    output_tokens,
-                    COALESCE(cache_creation_5m_input_tokens, 0)
-                        + COALESCE(cache_creation_1h_input_tokens, 0)
-                        AS cache_creation_input_tokens,
-                    cache_read_input_tokens,
-                    unified_5h_utilization,
-                    unified_7d_utilization,
-                    unified_5h_reset,
-                    unified_7d_reset
-                FROM responses
-                WHERE timestamp > :oldest_record{account_clause}
-                ORDER BY timestamp
-                """,
-                params,
-            ),
-            UsageRecord,
+    rows = conn.execute(
+        f"""
+        SELECT
+            timestamp,
+            input_tokens,
+            output_tokens,
+            COALESCE(cache_creation_5m_input_tokens, 0)
+                + COALESCE(cache_creation_1h_input_tokens, 0)
+                AS cache_creation_input_tokens,
+            cache_read_input_tokens,
+            cache_creation_5m_input_tokens,
+            cache_creation_1h_input_tokens,
+            unified_5h_utilization,
+            unified_7d_utilization,
+            unified_5h_reset,
+            unified_7d_reset,
+            model
+        FROM responses
+        WHERE timestamp > :oldest_record{account_clause}
+        ORDER BY timestamp
+        """,
+        params,
+    ).fetchall()
+
+    def _dt(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(value)
+
+    records: list[UsageRecord] = []
+    for row in rows:
+        (
+            timestamp,
+            input_tokens,
+            output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
+            cache_5m,
+            cache_1h,
+            unified_5h_utilization,
+            unified_7d_utilization,
+            unified_5h_reset,
+            unified_7d_reset,
+            model,
+        ) = row
+
+        cost_usd = cost(
+            model,
+            input_tokens,
+            output_tokens,
+            cache_5m,
+            cache_1h,
+            cache_read_input_tokens,
         )
+        is_extra = (unified_5h_utilization or 0) >= 1.0
+
+        records.append(
+            UsageRecord(
+                timestamp=timestamp
+                if isinstance(timestamp, datetime)
+                else datetime.fromisoformat(timestamp),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_input_tokens=cache_creation_input_tokens
+                if cache_creation_input_tokens > 0
+                else None,
+                cache_read_input_tokens=cache_read_input_tokens,
+                unified_5h_utilization=unified_5h_utilization,
+                unified_7d_utilization=unified_7d_utilization,
+                unified_5h_reset=unified_5h_reset
+                if isinstance(unified_5h_reset, datetime)
+                else (
+                    datetime.fromisoformat(unified_5h_reset)
+                    if unified_5h_reset
+                    else None
+                ),
+                unified_7d_reset=unified_7d_reset
+                if isinstance(unified_7d_reset, datetime)
+                else (
+                    datetime.fromisoformat(unified_7d_reset)
+                    if unified_7d_reset
+                    else None
+                ),
+                cost_usd=cost_usd,
+                is_extra_usage=is_extra,
+            )
+        )
+
+    return records
+
+
+class ExtraUsageSummary(BaseModel):
+    total_cost_usd: float | None
+    first_timestamp: datetime | None
+    last_timestamp: datetime | None
+    message_count: int
+
+
+@router.get("/extra-usage")
+async def _get_extra_usage(
+    request: Request, days: int = 7, account_id: str | None = None
+) -> ExtraUsageSummary:
+    conn: sqlite3.Connection = request.app.state.conn
+    params: dict[str, Any] = {"oldest_record": datetime.now(UTC) - timedelta(days=days)}
+    account_clause = ""
+    if account_id is not None:
+        account_clause = " AND account_id = :account_id"
+        params["account_id"] = account_id
+    rows = conn.execute(
+        f"""
+        SELECT
+            model,
+            COUNT(*) as message_count,
+            MIN(timestamp) as first_timestamp,
+            MAX(timestamp) as last_timestamp,
+            SUM(input_tokens) AS input_tokens,
+            SUM(output_tokens) AS output_tokens,
+            SUM(cache_creation_5m_input_tokens) AS cache_creation_5m_input_tokens,
+            SUM(cache_creation_1h_input_tokens) AS cache_creation_1h_input_tokens,
+            SUM(cache_read_input_tokens) AS cache_read_input_tokens
+        FROM responses
+        WHERE timestamp > :oldest_record
+          AND unified_5h_utilization >= 1.0{account_clause}
+        GROUP BY model
+        """,
+        params,
+    ).fetchall()
+
+    def _dt(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(value)
+
+    total_cost = 0.0
+    message_count = 0
+    first_ts = None
+    last_ts = None
+    has_unknown_model = False
+
+    for (
+        model,
+        msg_count,
+        first_ts_raw,
+        last_ts_raw,
+        input_tokens,
+        output_tokens,
+        cache_5m,
+        cache_1h,
+        cache_read,
+    ) in rows:
+        message_count += msg_count
+        first_dt = _dt(first_ts_raw)
+        last_dt = _dt(last_ts_raw)
+        first_ts = first_dt if first_ts is None else min(first_ts, first_dt)
+        last_ts = last_dt if last_ts is None else max(last_ts, last_dt)
+        c = cost(model, input_tokens, output_tokens, cache_5m, cache_1h, cache_read)
+        if c is None:
+            has_unknown_model = True
+        else:
+            total_cost += c
+
+    return ExtraUsageSummary(
+        total_cost_usd=None if has_unknown_model else total_cost,
+        first_timestamp=first_ts,
+        last_timestamp=last_ts,
+        message_count=message_count,
     )
 
 
@@ -453,6 +596,7 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             started_at,
             title,
         ) in rows
+        if not (title is None and previews.get(session_id) == "quota")
     ]
 
 

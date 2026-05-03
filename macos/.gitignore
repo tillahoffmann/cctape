@@ -1,0 +1,11 @@
+# XcodeGen-generated project (regenerate with `xcodegen` from project.yml)
+CCTapeBar.xcodeproj/
+
+# Xcode build / user state
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.swp
+.DS_Store
+buildServer.json

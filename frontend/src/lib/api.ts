@@ -8,6 +8,15 @@ export interface UsageRecord {
   unified_7d_utilization: number
   unified_5h_reset: string | null
   unified_7d_reset: string | null
+  cost_usd: number | null
+  is_extra_usage: boolean
+}
+
+export interface ExtraUsageSummary {
+  total_cost_usd: number | null
+  first_timestamp: string | null
+  last_timestamp: string | null
+  message_count: number
 }
 
 export interface SessionSummary {
@@ -133,6 +142,12 @@ export const api = {
       ? `?days=${days}&account_id=${encodeURIComponent(accountId)}`
       : `?days=${days}`
     return getJSON<UsageRecord[]>(`/api/usage${qs}`)
+  },
+  extraUsage: (days = 7, accountId?: string) => {
+    const qs = accountId
+      ? `?days=${days}&account_id=${encodeURIComponent(accountId)}`
+      : `?days=${days}`
+    return getJSON<ExtraUsageSummary>(`/api/extra-usage${qs}`)
   },
   accounts: () => getJSON<AccountSummary[]>('/api/accounts'),
   search: (q: string, limit = 50) =>

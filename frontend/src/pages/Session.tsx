@@ -486,7 +486,9 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
             {fmtNum(turn.response.input_tokens)} in
             · {fmtNum(turn.response.output_tokens)} out
             {turn.response.cache_read_input_tokens != null &&
-              ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache `}
+              ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache-read`}
+            {turn.response.cache_creation_input_tokens != null &&
+              ` · ${fmtNum(turn.response.cache_creation_input_tokens)} cache-write`}
             · {fmtPct(turn.response.unified_5h_utilization)} 5h
             · {fmtPct(turn.response.unified_7d_utilization)} 7d
             · {formatCost(turn.response.cost_usd)}
