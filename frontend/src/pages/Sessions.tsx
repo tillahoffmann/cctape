@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowDownToLine,
@@ -8,6 +8,7 @@ import {
   Folder,
   Gauge,
   GitBranch,
+  Loader2,
   MessagesSquare,
   Search,
 } from 'lucide-react'
@@ -187,12 +188,61 @@ function SessionCard({
   )
 }
 
+const PAGE_SIZE = 50
+
 export default function Sessions() {
-  // Auto-refreshes every 3s; identical server payloads resolve to the same
-  // cached object (via ETag/304), so React skips re-renders for no-op ticks.
+  // Infinite scroll: ask for the top-N most-recent sessions and grow N when the
+  // sentinel scrolls into view. Auto-refresh re-fetches the same N each tick,
+  // so newly-recorded sessions still appear at the top without losing progress.
+  const [limit, setLimit] = useState(PAGE_SIZE)
   const { data: fetchedSessions, error: sessionsError } = useAutoRefresh<
     SessionSummary[]
-  >(() => api.sessions())
+  >(() => api.sessions(limit), [limit])
+  // `hasMore` reflects the most recently *fulfilled* fetch, not the in-flight
+  // one. Without this, bumping `limit` flips `sessions.length >= limit` false
+  // before new data arrives — the sentinel unmounts mid-load and the user sees
+  // the spinner blink off until rows land. We update it only when the fetched
+  // array reference changes (i.e. a fetch resolved with new data), so an
+  // in-flight bump of `limit` doesn't drop the flag before the response.
+  const [hasMore, setHasMore] = useState(true)
+  const loadingMoreRef = useRef(false)
+  useEffect(() => {
+    if (fetchedSessions == null) return
+    // Snapshotting hasMore on fetch-resolution is exactly the "sync with
+    // external system" case the lint rule excludes; we can't compute it in
+    // render because we need yesterday's `limit`, not today's.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHasMore(fetchedSessions.length >= limit)
+    loadingMoreRef.current = false
+    // We deliberately don't depend on `limit` — see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchedSessions])
+  // Bump `limit` when the sentinel scrolls into view. We attach the observer
+  // via a ref callback so it tracks the actual sentinel lifecycle — a useEffect
+  // keyed on data wouldn't re-run when only the node identity changes.
+  // `loadingMoreRef` gates duplicate bumps: a freshly-created observer fires
+  // immediately for an already-in-view sentinel, which would otherwise cascade
+  // into hundreds of bumps before the first fetch resolves.
+  const observerRef = useRef<IntersectionObserver | null>(null)
+  const sentinelRef = (node: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect()
+      observerRef.current = null
+    }
+    if (!node) return
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (loadingMoreRef.current) return
+        if (entries.some((e) => e.isIntersecting)) {
+          loadingMoreRef.current = true
+          setLimit((prev) => prev + PAGE_SIZE)
+        }
+      },
+      { rootMargin: '200px' },
+    )
+    obs.observe(node)
+    observerRef.current = obs
+  }
   // Local override so optimistic title updates aren't clobbered between ticks.
   // Keyed by session_id; merged with the server copy on every render.
   const [titleOverrides, setTitleOverrides] = useState<
@@ -346,6 +396,14 @@ export default function Sessions() {
               onTitleChange={(next) => updateTitle(s.session_id, next)}
             />
           ))}
+          {hasMore && (
+            <div
+              ref={sentinelRef}
+              className="flex justify-center py-6 text-muted-foreground"
+            >
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          )}
         </div>
       )}
     </div>

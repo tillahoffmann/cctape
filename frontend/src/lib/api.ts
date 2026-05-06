@@ -126,7 +126,10 @@ export type Pricing = Record<string, Record<string, number>>
 export const api = {
   config: () => getJSON<Config>('/api/config'),
   pricing: () => getJSON<Pricing>('/api/pricing'),
-  sessions: () => getJSON<SessionSummary[]>('/api/sessions'),
+  sessions: (limit?: number) =>
+    getJSON<SessionSummary[]>(
+      limit ? `/api/sessions?limit=${limit}` : '/api/sessions',
+    ),
   session: (id: string) => getJSON<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
   usage: (days = 7, accountId?: string) => {
     const qs = accountId

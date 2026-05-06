@@ -310,12 +310,17 @@ def _extract_preview(
 
 
 @router.get("/sessions")
-async def _get_sessions(request: Request) -> list[SessionSummary]:
+async def _get_sessions(
+    request: Request, limit: int | None = None
+) -> list[SessionSummary]:
     conn: sqlite3.Connection = request.app.state.conn
     # Aggregate per-session metrics. LEFT JOIN because a request may not yet have
-    # a response row (in-flight or failed).
-    rows = conn.execute(
-        """
+    # a response row (in-flight or failed). When `limit` is set, the frontend's
+    # infinite-scroll asks for the top-N most-recent sessions; we still aggregate
+    # every session_id before sorting (SQLite can't push LIMIT through GROUP BY)
+    # so the per-row cost is the same, but the response and the downstream Q2/Q3
+    # passes are constrained to the visible subset.
+    sql = """
         SELECT
             r.session_id AS session_id,
             MIN(r.timestamp) AS first_timestamp,
@@ -345,26 +350,48 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
         WHERE r.session_id IS NOT NULL
         GROUP BY r.session_id
         ORDER BY last_timestamp DESC
-        """
-    ).fetchall()
+    """
+    params: tuple[Any, ...] = ()
+    if limit is not None and limit > 0:
+        sql += " LIMIT ?"
+        params = (limit,)
+    rows = conn.execute(sql, params).fetchall()
+    visible_session_ids = {row[0] for row in rows}
 
     # Fetch the earliest request per session for preview text. Prefer the dedup
     # columns; fall back to `payload` for legacy rows whose body failed to parse.
     # Join on (session_id, timestamp) against a grouped subquery — portable and
     # correct when multiple rows share the min timestamp. The dict comprehension
     # below collapses ties by keeping whichever row hits the key last.
-    preview_rows = conn.execute(
+    # When the caller asked for a limited slice, restrict to the visible
+    # session_ids so we don't crack blob lookups for sessions we won't return.
+    if limit is not None and limit > 0 and visible_session_ids:
+        placeholders = ",".join("?" * len(visible_session_ids))
+        ids_tuple = tuple(visible_session_ids)
+        preview_sql = f"""
+            SELECT r.session_id, r.message_hashes, r.payload
+            FROM requests r
+            JOIN (
+                SELECT session_id, MIN(timestamp) AS min_ts
+                FROM requests
+                WHERE session_id IN ({placeholders})
+                GROUP BY session_id
+            ) first ON first.session_id = r.session_id AND r.timestamp = first.min_ts
         """
-        SELECT r.session_id, r.message_hashes, r.payload
-        FROM requests r
-        JOIN (
-            SELECT session_id, MIN(timestamp) AS min_ts
-            FROM requests
-            WHERE session_id IS NOT NULL
-            GROUP BY session_id
-        ) first ON first.session_id = r.session_id AND r.timestamp = first.min_ts
-        """
-    ).fetchall()
+        preview_rows = conn.execute(preview_sql, ids_tuple).fetchall()
+    else:
+        preview_rows = conn.execute(
+            """
+            SELECT r.session_id, r.message_hashes, r.payload
+            FROM requests r
+            JOIN (
+                SELECT session_id, MIN(timestamp) AS min_ts
+                FROM requests
+                WHERE session_id IS NOT NULL
+                GROUP BY session_id
+            ) first ON first.session_id = r.session_id AND r.timestamp = first.min_ts
+            """
+        ).fetchall()
     previews: dict[str, str | None] = {
         session_id: _extract_preview(conn, message_hashes, payload)
         for session_id, message_hashes, payload in preview_rows
@@ -376,8 +403,14 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
     # silently understate cost. Rows with no recorded tokens (typically
     # errors with no model_start event) are filtered out in SQL so they
     # don't flip otherwise-costable sessions to "unknown".
+    cost_session_filter = "r.session_id IS NOT NULL"
+    cost_params: tuple[Any, ...] = ()
+    if limit is not None and limit > 0 and visible_session_ids:
+        placeholders = ",".join("?" * len(visible_session_ids))
+        cost_session_filter = f"r.session_id IN ({placeholders})"
+        cost_params = tuple(visible_session_ids)
     cost_rows = conn.execute(
-        """
+        f"""
         SELECT
             r.session_id,
             resp.model,
@@ -388,14 +421,15 @@ async def _get_sessions(request: Request) -> list[SessionSummary]:
             SUM(resp.cache_read_input_tokens)
         FROM requests r
         JOIN responses resp ON resp.request_row_id = r.id
-        WHERE r.session_id IS NOT NULL
+        WHERE {cost_session_filter}
           AND COALESCE(resp.input_tokens, 0)
             + COALESCE(resp.output_tokens, 0)
             + COALESCE(resp.cache_creation_5m_input_tokens, 0)
             + COALESCE(resp.cache_creation_1h_input_tokens, 0)
             + COALESCE(resp.cache_read_input_tokens, 0) > 0
         GROUP BY r.session_id, resp.model
-        """
+        """,
+        cost_params,
     ).fetchall()
     session_costs: dict[str, float] = {}
     sessions_with_unknown: set[str] = set()
