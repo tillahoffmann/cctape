@@ -22,7 +22,7 @@ import {
   MessagesSquare,
 } from 'lucide-react'
 import { api, type AccountSummary, type UsageRecord } from '../lib/api'
-import { formatCost } from '../lib/formatCost'
+import { formatCost, formatCount, formatPct, formatTokens } from '../lib/format'
 import { useAutoRefresh } from '../lib/useAutoRefresh'
 import { useNow } from '../lib/useNow'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -39,13 +39,6 @@ const STORAGE_KEY = 'usage.selectedAccountId'
 
 function formatDate(s: string): string {
   return new Date(s).toLocaleDateString()
-}
-
-function formatCompact(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`
-  return String(n)
 }
 
 function totalTokens(a: AccountSummary): number {
@@ -85,19 +78,19 @@ function AccountOption({
       <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
         <span className="inline-flex items-center gap-1">
           <MessagesSquare className="h-3.5 w-3.5" />
-          <span className="tabular-nums">{account.message_count}</span> msgs
+          <span className="tabular-nums">{formatCount(account.message_count)}</span> msgs
         </span>
         <span className="inline-flex items-center gap-1">
           <ArrowDownToLine className="h-3.5 w-3.5" />
           <span className="tabular-nums">
-            {formatCompact(account.input_tokens ?? 0)}
+            {formatTokens(account.input_tokens ?? 0)}
           </span>{' '}
           in
         </span>
         <span className="inline-flex items-center gap-1">
           <ArrowUpFromLine className="h-3.5 w-3.5" />
           <span className="tabular-nums">
-            {formatCompact(account.output_tokens ?? 0)}
+            {formatTokens(account.output_tokens ?? 0)}
           </span>{' '}
           out
         </span>
@@ -136,11 +129,11 @@ function AccountPicker({
             <span className="font-mono">{shortId(selected.account_id)}</span>
             <span className="text-muted-foreground">·</span>
             <span className="text-muted-foreground tabular-nums">
-              {selected.message_count} msgs
+              {formatCount(selected.message_count)} msgs
             </span>
             <span className="text-muted-foreground">·</span>
             <span className="text-muted-foreground tabular-nums">
-              {formatCompact(totalTokens(selected))} tok
+              {formatTokens(totalTokens(selected))} tok
             </span>
             <span className="text-muted-foreground">·</span>
             <span className="text-muted-foreground tabular-nums">
@@ -295,9 +288,6 @@ export default function Usage() {
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
   }
 
-  const fmtPct = (v: number | null | undefined) =>
-    v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`
-
   const UsageTooltip = ({ active, payload }: TooltipContentProps) => {
     if (!active || !payload || payload.length === 0) return null
     const first = payload[0] as { payload?: { t?: number } } | undefined
@@ -316,7 +306,7 @@ export default function Usage() {
             style={{ backgroundColor: 'var(--color-chart-1)' }}
           />
           <span className="text-muted-foreground">5h</span>
-          <span className="ml-auto tabular-nums">{fmtPct(v5 as number | null)}</span>
+          <span className="ml-auto tabular-nums">{formatPct(v5 as number | null)}</span>
         </div>
         <div className="flex items-center gap-2">
           <span
@@ -324,7 +314,7 @@ export default function Usage() {
             style={{ backgroundColor: 'var(--color-chart-2)' }}
           />
           <span className="text-muted-foreground">7d</span>
-          <span className="ml-auto tabular-nums">{fmtPct(v7 as number | null)}</span>
+          <span className="ml-auto tabular-nums">{formatPct(v7 as number | null)}</span>
         </div>
       </div>
     )
@@ -387,7 +377,7 @@ export default function Usage() {
                       : `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                   }}
                 />
-                <YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
+                <YAxis domain={[0, 1]} tickFormatter={(v) => formatPct(v as number)} />
                 <Tooltip content={UsageTooltip} isAnimationActive={false} />
                 <Legend />
                 <Line

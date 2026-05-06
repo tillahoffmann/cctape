@@ -6,7 +6,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Check, Clock, Copy, Folder, GitBranch, Hash, MessagesSquare } from 'lucide-react'
 import { api, type SessionDetail, type Turn } from '../lib/api'
-import { formatCost } from '../lib/formatCost'
+import { formatCost, formatCount, formatPct, formatTokens } from '../lib/format'
 import { LiveTimestamp } from '../lib/LiveTimestamp'
 import { EditableTitle } from '../lib/EditableTitle'
 import { useHeaderSlot } from '../lib/headerSlotContext'
@@ -303,14 +303,6 @@ function renderUserBlock(block: Block, key: number) {
   )
 }
 
-function fmtNum(n: number | null | undefined): string {
-  return n == null ? '—' : n.toLocaleString()
-}
-
-function fmtPct(n: number | null | undefined): string {
-  return n == null ? '—' : `${(100 * n).toLocaleString()}%`;
-}
-
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   const disabled = !text
@@ -483,12 +475,12 @@ function TurnView({ turn, toolResults }: { turn: Turn; toolResults: Map<string, 
             </div>
           )}
           <div className="text-xs text-muted-foreground">
-            {fmtNum(turn.response.input_tokens)} in
-            · {fmtNum(turn.response.output_tokens)} out
+            {formatTokens(turn.response.input_tokens)} in
+            · {formatTokens(turn.response.output_tokens)} out
             {turn.response.cache_read_input_tokens != null &&
-              ` · ${fmtNum(turn.response.cache_read_input_tokens)} cache `}
-            · {fmtPct(turn.response.unified_5h_utilization)} 5h
-            · {fmtPct(turn.response.unified_7d_utilization)} 7d
+              ` · ${formatTokens(turn.response.cache_read_input_tokens)} cache `}
+            · {formatPct(turn.response.unified_5h_utilization)} 5h
+            · {formatPct(turn.response.unified_7d_utilization)} 7d
             · {formatCost(turn.response.cost_usd)}
             {turn.response.model && (
               <span className="ml-1 font-mono">({turn.response.model})</span>
@@ -614,7 +606,7 @@ export default function Session() {
         )}
         <span className="inline-flex items-center gap-1">
           <MessagesSquare className="h-3.5 w-3.5 shrink-0" />
-          <span className="tabular-nums">{detail.turns.length}</span> turns
+          <span className="tabular-nums">{formatCount(detail.turns.length)}</span> turns
         </span>
         {detail.started_at && (
           <span className="inline-flex items-center gap-1">

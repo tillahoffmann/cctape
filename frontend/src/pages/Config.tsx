@@ -22,7 +22,10 @@ const PRICE_COLUMNS: Array<{ key: string; label: string }> = [
 
 function formatRate(n: number | undefined): string {
   if (n === undefined) return '—'
-  return `$${n.toFixed(2)}`
+  return `$${n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
 }
 
 function SectionTitle({

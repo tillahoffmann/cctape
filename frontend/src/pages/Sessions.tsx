@@ -13,18 +13,11 @@ import {
   Search,
 } from 'lucide-react'
 import { api, type SearchHit, type SessionSummary } from '../lib/api'
-import { formatCost } from '../lib/formatCost'
+import { formatCost, formatCount, formatTokens } from '../lib/format'
 import { LiveTimestamp } from '../lib/LiveTimestamp'
 import { EditableTitle } from '../lib/EditableTitle'
 import { useAutoRefresh } from '../lib/useAutoRefresh'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-
-function formatTokens(n: number | null): string {
-  if (n == null) return '—'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return String(n)
-}
 
 function basename(path: string | null): string {
   if (!path) return '—'
@@ -137,7 +130,7 @@ function SessionCard({
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {hitCount !== undefined && (
             <MetaItem icon={Search} className="!text-primary font-medium">
-              <span className="tabular-nums">{hitCount}</span> {hitCount === 1 ? 'hit' : 'hits'}
+              <span className="tabular-nums">{formatCount(hitCount)}</span> {hitCount === 1 ? 'hit' : 'hits'}
             </MetaItem>
           )}
           <MetaItem icon={Folder} title={cwd ?? ''} className="font-mono text-xs">
@@ -153,7 +146,7 @@ function SessionCard({
           )}
           {turnCount !== undefined && (
             <MetaItem icon={MessagesSquare}>
-              <span className="tabular-nums">{turnCount}</span> turns
+              <span className="tabular-nums">{formatCount(turnCount)}</span> turns
             </MetaItem>
           )}
           {inputTokens !== undefined && (
