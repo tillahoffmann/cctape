@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from .fts import _to_fts_query, search_sessions
-from .storage import _split_hashes, decompress, reconstruct_payload
+from .storage import decompress, load_message_hashes, reconstruct_payload
 
 # Hard caps enforced server-side. Agents must choose an explicit window; the
 # caps protect them from blowing their own context on one bad call.
@@ -24,8 +24,8 @@ DEFAULT_TRUNCATE_CHARS = 2000
 
 def _last_request_hashes(
     conn: sqlite3.Connection, session_id: str
-) -> tuple[bytes | None, bytes | None] | None:
-    """Return (message_hashes, payload) for the last request in a session.
+) -> tuple[list[bytes], bytes | None] | None:
+    """Return (message_hash_list, payload) for the last request in a session.
 
     The Anthropic API is stateless: each request body contains the whole
     conversation-so-far in `messages`. The LAST request therefore carries the
@@ -33,11 +33,20 @@ def _last_request_hashes(
     session. Returns None if the session has no requests.
     """
     row = conn.execute(
-        "SELECT message_hashes, payload FROM requests "
+        "SELECT message_refs, message_refs_inline, payload FROM requests "
         "WHERE session_id = ? ORDER BY timestamp DESC, id DESC LIMIT 1",
         (session_id,),
     ).fetchone()
-    return row
+    if row is None:
+        return None
+    message_refs, message_refs_inline, payload = row
+    hashes = load_message_hashes(
+        conn,
+        session_id=session_id,
+        message_refs=message_refs,
+        message_refs_inline=message_refs_inline,
+    )
+    return hashes, payload
 
 
 def _turn_count(conn: sqlite3.Connection, session_id: str) -> int:
@@ -49,8 +58,7 @@ def _turn_count(conn: sqlite3.Connection, session_id: str) -> int:
     row = _last_request_hashes(conn, session_id)
     if row is None:
         return 0
-    message_hashes, payload = row
-    hashes = _split_hashes(message_hashes)
+    hashes, payload = row
     if hashes:
         return len(hashes)
     # Legacy / unparseable row: reconstruct to count.
@@ -79,8 +87,7 @@ def _first_hit_turn(
     row = _last_request_hashes(conn, session_id)
     if row is None:
         return None
-    message_hashes, _ = row
-    hashes = _split_hashes(message_hashes)
+    hashes, _ = row
     if not hashes:
         return None
     digest_set = set(digests)
@@ -312,7 +319,8 @@ def get_session_window_impl(
     # Pull the last request — its `messages` is the canonical transcript.
     last = conn.execute(
         """
-        SELECT system_hash, tools_hash, message_hashes, extras, payload
+        SELECT system_hash, tools_hash, message_refs, message_refs_inline,
+               extras, payload
         FROM requests
         WHERE session_id = ?
         ORDER BY timestamp DESC, id DESC
@@ -323,10 +331,24 @@ def get_session_window_impl(
 
     turns: list[dict[str, Any]] = []
     if last is not None:
-        system_hash, tools_hash, message_hashes, extras, payload = last
+        (
+            system_hash,
+            tools_hash,
+            message_refs,
+            message_refs_inline,
+            extras,
+            payload,
+        ) = last
         try:
             body = reconstruct_payload(
-                conn, system_hash, tools_hash, message_hashes, extras, payload
+                conn,
+                system_hash,
+                tools_hash,
+                extras=extras,
+                payload=payload,
+                session_id=session_id,
+                message_refs=message_refs,
+                message_refs_inline=message_refs_inline,
             )
         except (ValueError, KeyError):
             body = None

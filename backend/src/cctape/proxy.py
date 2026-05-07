@@ -66,6 +66,7 @@ async def _post_messages(request: Request):
     # fails to parse do we fall back to the legacy single-blob `payload` column.
     conn: sqlite3.Connection = request.app.state.conn
     request_body = await request.body()
+    session_id_header = request.headers.get("x-claude-code-session-id")
     values = {
         "headers": compress(
             json.dumps(
@@ -73,15 +74,16 @@ async def _post_messages(request: Request):
             ).encode()
         ),
         "timestamp": datetime.now(UTC).isoformat(),
-        "session_id": request.headers.get("x-claude-code-session-id"),
+        "session_id": session_id_header,
         "system_hash": None,
         "tools_hash": None,
-        "message_hashes": None,
+        "message_refs": None,
+        "message_refs_inline": None,
         "extras": None,
         "payload": None,
     }
     try:
-        values.update(decompose_payload(conn, request_body))
+        values.update(decompose_payload(conn, request_body, session_id_header))
     except (ValueError, TypeError):
         values["payload"] = compress(request_body)
 
@@ -102,10 +104,12 @@ async def _post_messages(request: Request):
         """
         INSERT INTO requests (
             timestamp, headers, session_id,
-            system_hash, tools_hash, message_hashes, extras, payload
+            system_hash, tools_hash, message_refs, message_refs_inline,
+            extras, payload
         ) VALUES (
             :timestamp, :headers, :session_id,
-            :system_hash, :tools_hash, :message_hashes, :extras, :payload
+            :system_hash, :tools_hash, :message_refs, :message_refs_inline,
+            :extras, :payload
         )
         """,
         values,
@@ -126,7 +130,8 @@ async def _post_messages(request: Request):
         session_id,
         values["system_hash"],
         values["tools_hash"],
-        values["message_hashes"],
+        message_refs=values["message_refs"],
+        message_refs_inline=values["message_refs_inline"],
     )
     conn.commit()
 

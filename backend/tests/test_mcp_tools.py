@@ -58,13 +58,14 @@ def _insert_request(
     timestamp: str,
 ) -> int:
     body = json.dumps({"model": "claude-opus-4-7", "messages": messages}).encode()
-    decomposed = decompose_payload(conn, body)
+    decomposed = decompose_payload(conn, body, session_id)
     cur = conn.execute(
         """
         INSERT INTO requests (
             timestamp, headers, session_id,
-            system_hash, tools_hash, message_hashes, extras, payload
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            system_hash, tools_hash, message_refs, message_refs_inline,
+            extras, payload
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             timestamp,
@@ -72,7 +73,8 @@ def _insert_request(
             session_id,
             decomposed["system_hash"],
             decomposed["tools_hash"],
-            decomposed["message_hashes"],
+            decomposed["message_refs"],
+            decomposed["message_refs_inline"],
             decomposed["extras"],
             decomposed["payload"],
         ),

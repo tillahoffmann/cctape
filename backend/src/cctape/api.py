@@ -288,11 +288,19 @@ async def _get_accounts(request: Request) -> list[AccountSummary]:
 
 def _extract_preview(
     conn: sqlite3.Connection,
-    message_hashes: bytes | None,
+    session_id: str | None,
+    message_refs: bytes | None,
+    message_refs_inline: bytes | None,
     payload: bytes | None,
     limit: int = 200,
 ) -> str | None:
-    first = first_message(conn, message_hashes, payload)
+    first = first_message(
+        conn,
+        session_id=session_id,
+        message_refs=message_refs,
+        message_refs_inline=message_refs_inline,
+        payload=payload,
+    )
     if not isinstance(first, dict):
         return None
     content = first.get("content")
@@ -370,7 +378,7 @@ async def _get_sessions(
         placeholders = ",".join("?" * len(visible_session_ids))
         ids_tuple = tuple(visible_session_ids)
         preview_sql = f"""
-            SELECT r.session_id, r.message_hashes, r.payload
+            SELECT r.session_id, r.message_refs, r.message_refs_inline, r.payload
             FROM requests r
             JOIN (
                 SELECT session_id, MIN(timestamp) AS min_ts
@@ -383,7 +391,7 @@ async def _get_sessions(
     else:
         preview_rows = conn.execute(
             """
-            SELECT r.session_id, r.message_hashes, r.payload
+            SELECT r.session_id, r.message_refs, r.message_refs_inline, r.payload
             FROM requests r
             JOIN (
                 SELECT session_id, MIN(timestamp) AS min_ts
@@ -394,8 +402,10 @@ async def _get_sessions(
             """
         ).fetchall()
     previews: dict[str, str | None] = {
-        session_id: _extract_preview(conn, message_hashes, payload)
-        for session_id, message_hashes, payload in preview_rows
+        session_id: _extract_preview(
+            conn, session_id, message_refs, message_refs_inline, payload
+        )
+        for session_id, message_refs, message_refs_inline, payload in preview_rows
     }
 
     # Per-session cost: group responses by (session_id, model), compute cost
@@ -501,7 +511,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             r.timestamp AS request_timestamp,
             r.system_hash AS system_hash,
             r.tools_hash AS tools_hash,
-            r.message_hashes AS message_hashes,
+            r.message_refs AS message_refs,
+            r.message_refs_inline AS message_refs_inline,
             r.extras AS extras,
             r.payload AS request_payload,
             resp.status_code AS status_code,
@@ -541,7 +552,8 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             request_timestamp,
             system_hash,
             tools_hash,
-            message_hashes,
+            message_refs,
+            message_refs_inline,
             extras,
             request_payload,
             status_code,
@@ -567,7 +579,12 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             extras_dict: dict[str, Any] = (
                 json.loads(decompress(extras)) if extras else {}
             )
-            last = last_message(conn, message_hashes)
+            last = last_message(
+                conn,
+                session_id=session_id,
+                message_refs=message_refs,
+                message_refs_inline=message_refs_inline,
+            )
             parsed_request: dict[str, Any] | None = {
                 **extras_dict,
                 "messages": [last] if last is not None else [],

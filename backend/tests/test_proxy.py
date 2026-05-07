@@ -65,10 +65,12 @@ def test_post_message(client: TestClient, cctape_db: Path, compress: bool) -> No
             session_id,
             system_hash,
             tools_hash,
-            message_hashes,
+            message_refs,
+            message_refs_inline,
             legacy_payload,
         ) = conn.execute(
-            "SELECT id, session_id, system_hash, tools_hash, message_hashes, payload FROM requests"
+            "SELECT id, session_id, system_hash, tools_hash, "
+            "message_refs, message_refs_inline, payload FROM requests"
         ).fetchone()
         assert session_id == "testing-session-1234"
         # Parseable bodies take the dedup path: legacy payload column stays NULL,
@@ -76,11 +78,20 @@ def test_post_message(client: TestClient, cctape_db: Path, compress: bool) -> No
         assert legacy_payload is None
         assert isinstance(system_hash, bytes) and len(system_hash) == 32
         assert isinstance(tools_hash, bytes) and len(tools_hash) == 32
-        # `message_hashes` is a BLOB of concatenated 32-byte digests.
-        assert isinstance(message_hashes, bytes)
-        assert len(message_hashes) > 0 and len(message_hashes) % 32 == 0
-        hashes = [message_hashes[i : i + 32] for i in range(0, len(message_hashes), 32)]
-        for digest in [system_hash, tools_hash, *hashes]:
+        # Sessioned requests use `message_refs` (varint-packed indices into the
+        # per-session dictionary); resolve via session_message_dict.
+        assert message_refs is not None
+        assert message_refs_inline is None
+        dict_hashes = [
+            h
+            for (h,) in conn.execute(
+                "SELECT hash FROM session_message_dict "
+                "WHERE session_id = ? ORDER BY idx",
+                (session_id,),
+            ).fetchall()
+        ]
+        assert len(dict_hashes) > 0
+        for digest in [system_hash, tools_hash, *dict_hashes]:
             assert (
                 conn.execute("SELECT 1 FROM blobs WHERE hash = ?", (digest,)).fetchone()
                 is not None

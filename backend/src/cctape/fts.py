@@ -19,7 +19,7 @@ import re
 import sqlite3
 from typing import Any
 
-from .storage import _split_hashes, decompress
+from .storage import decompress, load_message_hashes
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +143,9 @@ def index_request_blobs(
     session_id: str | None,
     system_hash: bytes | None,
     tools_hash: bytes | None,
-    message_hashes: bytes | None,
+    *,
+    message_refs: bytes | None,
+    message_refs_inline: bytes | None,
 ) -> None:
     """Index every blob referenced by a new request and map them to the session.
 
@@ -157,7 +159,14 @@ def index_request_blobs(
             digests.append(system_hash)
         if tools_hash:
             digests.append(tools_hash)
-        digests.extend(_split_hashes(message_hashes))
+        digests.extend(
+            load_message_hashes(
+                conn,
+                session_id=session_id,
+                message_refs=message_refs,
+                message_refs_inline=message_refs_inline,
+            )
+        )
         if not digests:
             return
         for digest in digests:
@@ -206,9 +215,16 @@ def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
     # Populate session_blobs from requests newer than the watermark. The set
     # collapses repeated (session, hash) pairs from conversation replay.
     pairs: set[tuple[str, bytes]] = set()
-    for session_id, system_hash, tools_hash, message_hashes in conn.execute(
+    for (
+        session_id,
+        system_hash,
+        tools_hash,
+        message_refs,
+        message_refs_inline,
+    ) in conn.execute(
         """
-        SELECT session_id, system_hash, tools_hash, message_hashes
+        SELECT session_id, system_hash, tools_hash,
+               message_refs, message_refs_inline
         FROM requests
         WHERE session_id IS NOT NULL AND id > ?
         """,
@@ -218,7 +234,12 @@ def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
             pairs.add((session_id, system_hash))
         if tools_hash:
             pairs.add((session_id, tools_hash))
-        for h in _split_hashes(message_hashes):
+        for h in load_message_hashes(
+            conn,
+            session_id=session_id,
+            message_refs=message_refs,
+            message_refs_inline=message_refs_inline,
+        ):
             pairs.add((session_id, h))
 
     before = conn.execute("SELECT COUNT(*) FROM session_blobs").fetchone()[0]

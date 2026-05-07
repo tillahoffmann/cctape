@@ -12,12 +12,15 @@ CREATE TABLE requests (
     "session_id" TEXT,
 
     -- Deduplicated payload components. `system` and `tools` are each stored as a
-    -- single blob; `message_hashes` is the concatenation of 32-byte digests in
-    -- message order. `extras` is a gzip-compressed JSON object holding any other
-    -- top-level request fields (model, max_tokens, thinking, etc.).
+    -- single blob; the message list is stored as a varint-packed sequence of
+    -- indices into `session_message_dict` (per-session hash dictionary), or as
+    -- a flat 32-byte concatenation in `message_refs_inline` for sessionless rows.
+    -- `extras` is a gzip-compressed JSON object holding any other top-level
+    -- request fields (model, max_tokens, thinking, etc.).
     "system_hash" BLOB REFERENCES blobs(hash),
     "tools_hash" BLOB REFERENCES blobs(hash),
-    "message_hashes" BLOB,
+    "message_refs" BLOB,
+    "message_refs_inline" BLOB,
     "extras" BLOB,
 
     -- Fallback for bodies that could not be parsed as JSON. Set only when the
@@ -92,3 +95,22 @@ CREATE TABLE session_blobs (
     PRIMARY KEY (session_id, hash)
 );
 CREATE INDEX session_blobs_hash ON session_blobs(hash);
+
+-- Per-session dictionary mapping a small integer index to a message-blob hash.
+-- Indices are assigned in order-of-first-appearance within the session and are
+-- referenced from `requests.message_refs` as varints. Replaces the per-request
+-- 32-byte-per-message storage; saves ~93% on the column for typical archives.
+CREATE TABLE session_message_dict (
+    "session_id" TEXT NOT NULL,
+    "idx" INTEGER NOT NULL,
+    "hash" BLOB NOT NULL,
+    PRIMARY KEY (session_id, idx)
+);
+CREATE INDEX session_message_dict_lookup ON session_message_dict(session_id, hash);
+
+-- Schema migration version. Bumped by migrations.py after each successful run.
+CREATE TABLE meta (
+    "key" TEXT PRIMARY KEY,
+    "value" TEXT NOT NULL
+);
+INSERT INTO meta (key, value) VALUES ('schema_version', '2');
