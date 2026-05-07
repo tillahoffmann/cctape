@@ -53,6 +53,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (session_id, hash)
         );
         CREATE INDEX IF NOT EXISTS session_blobs_hash ON session_blobs(hash);
+        CREATE TABLE IF NOT EXISTS fts_meta (
+            "key" TEXT PRIMARY KEY,
+            "value" INTEGER NOT NULL
+        );
         """
     )
     conn.commit()
@@ -188,15 +192,27 @@ def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
         index_blob(conn, digest, data)
         blobs_indexed += 1
 
-    # Populate session_blobs from existing requests. The GROUP BY collapses
-    # repeated (session, hash) pairs from conversation replay.
+    # Watermark: only scan requests appended since the last backfill.
+    # index_request_blobs already inserts session_blobs pairs on the proxy
+    # ingest path, so steady-state there's nothing to do here. Without this,
+    # backfill rebuilt the full pair set on every startup (8s+ on large DBs).
+    last_id = conn.execute(
+        "SELECT value FROM fts_meta WHERE key = 'session_blobs_max_request_id'"
+    ).fetchone()
+    last_id = last_id[0] if last_id else 0
+    max_id_row = conn.execute("SELECT MAX(id) FROM requests").fetchone()
+    max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
+
+    # Populate session_blobs from requests newer than the watermark. The set
+    # collapses repeated (session, hash) pairs from conversation replay.
     pairs: set[tuple[str, bytes]] = set()
     for session_id, system_hash, tools_hash, message_hashes in conn.execute(
         """
         SELECT session_id, system_hash, tools_hash, message_hashes
         FROM requests
-        WHERE session_id IS NOT NULL
-        """
+        WHERE session_id IS NOT NULL AND id > ?
+        """,
+        (last_id,),
     ).fetchall():
         if system_hash:
             pairs.add((session_id, system_hash))
@@ -211,6 +227,11 @@ def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
         pairs,
     )
     after = conn.execute("SELECT COUNT(*) FROM session_blobs").fetchone()[0]
+    conn.execute(
+        "INSERT OR REPLACE INTO fts_meta (key, value) VALUES "
+        "('session_blobs_max_request_id', ?)",
+        (max_id,),
+    )
     conn.commit()
     return blobs_indexed, after - before
 
