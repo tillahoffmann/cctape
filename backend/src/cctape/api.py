@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version
@@ -8,7 +9,7 @@ from pydantic import BaseModel
 
 from .fts import search_sessions
 from .pricing import PRICING, cost
-from .storage import decompress, first_message, reconstruct_payload
+from .storage import decompress, first_message, last_message
 from .util import iter_records
 
 router = APIRouter(prefix="/api")
@@ -556,16 +557,22 @@ async def _get_session(request: Request, session_id: str) -> SessionDetail:
             model,
         ) = row
 
+        # Anthropic requests embed the full conversation prefix in `messages`;
+        # for the transcript view we only render the last (new) message, so
+        # rehydrating every prior message for every turn is O(N²) waste — for
+        # a 1500-turn session that's 1.13M blob loads and 1.68 GB on the wire.
+        # We keep `extras` (model, max_tokens, output_config, …) for per-turn
+        # metadata and ship system/tools nowhere; lazy-fetch when a UI needs them.
         try:
-            parsed_request = reconstruct_payload(
-                conn,
-                system_hash,
-                tools_hash,
-                message_hashes,
-                extras,
-                request_payload,
+            extras_dict: dict[str, Any] = (
+                json.loads(decompress(extras)) if extras else {}
             )
-        except (ValueError, KeyError):
+            last = last_message(conn, message_hashes)
+            parsed_request: dict[str, Any] | None = {
+                **extras_dict,
+                "messages": [last] if last is not None else [],
+            }
+        except (ValueError, KeyError, OSError):
             parsed_request = None
 
         response: ResponseRecord | None = None

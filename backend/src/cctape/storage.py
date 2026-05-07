@@ -148,3 +148,19 @@ def first_message(
         return None
     msgs = data.get("messages") or []
     return msgs[0] if msgs else None
+
+
+def last_message(
+    conn: sqlite3.Connection, message_hashes: bytes | None
+) -> dict[str, Any] | None:
+    """Return the last message of a request via a single blob lookup.
+
+    Anthropic API requests carry the entire conversation prefix in `messages`,
+    so for a session's transcript view we only need the *new* message at the
+    tail of each request. This avoids the O(N²) cost of rehydrating every
+    prior message for every turn.
+    """
+    if not message_hashes or len(message_hashes) < _HASH_SIZE:
+        return None
+    last_hash = message_hashes[-_HASH_SIZE:]
+    return json.loads(_load_blob(conn, last_hash))
