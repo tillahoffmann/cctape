@@ -1,13 +1,17 @@
+import { lazy, Suspense } from 'react'
 import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import Sessions from './pages/Sessions'
 import Session from './pages/Session'
-import Usage from './pages/Usage'
-import Config from './pages/Config'
-import Setup from './pages/Setup'
 import { CassetteTape } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HeaderSlotProvider } from './lib/HeaderSlot'
 import { useHeaderSlotValue } from './lib/headerSlotContext'
+
+// Non-default routes are split out so the session-page critical path stays
+// lean. /usage in particular pulls in recharts (~1.16 MB raw, ~350 KB gzip).
+const Usage = lazy(() => import('./pages/Usage'))
+const Config = lazy(() => import('./pages/Config'))
+const Setup = lazy(() => import('./pages/Setup'))
 
 function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   return (
@@ -73,16 +77,18 @@ export default function App() {
       <div className="min-h-screen flex flex-col">
         <Header />
         <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-4">
-          <Routes>
-            <Route path="/" element={<Navigate to="/sessions" replace />} />
-            <Route path="/sessions" element={<Sessions />} />
-            <Route path="/sessions/:sessionId" element={<Session />} />
-            <Route path="/usage" element={<Usage />} />
-            <Route path="/config" element={<Config />} />
-            <Route path="/settings" element={<Navigate to="/config" replace />} />
-            <Route path="/setup" element={<Setup />} />
-            <Route path="*" element={<div className="text-muted-foreground">Not found.</div>} />
-          </Routes>
+          <Suspense fallback={null}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/sessions" replace />} />
+              <Route path="/sessions" element={<Sessions />} />
+              <Route path="/sessions/:sessionId" element={<Session />} />
+              <Route path="/usage" element={<Usage />} />
+              <Route path="/config" element={<Config />} />
+              <Route path="/settings" element={<Navigate to="/config" replace />} />
+              <Route path="/setup" element={<Setup />} />
+              <Route path="*" element={<div className="text-muted-foreground">Not found.</div>} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
     </HeaderSlotProvider>
