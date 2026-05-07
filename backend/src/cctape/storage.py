@@ -33,6 +33,19 @@ def _canonical(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
+def _strip_cache_control(value: Any) -> Any:
+    # cache_control hints toggle on/off across requests for the same content,
+    # producing duplicate blobs. Drop them before hashing — the proxy still
+    # forwards the original body upstream, so the API sees the hints intact.
+    if isinstance(value, list):
+        return [_strip_cache_control(v) for v in value]
+    if isinstance(value, dict):
+        return {
+            k: _strip_cache_control(v) for k, v in value.items() if k != "cache_control"
+        }
+    return value
+
+
 def _intern(conn: sqlite3.Connection, value: Any) -> bytes | None:
     """Insert `value` into `blobs` if missing and return its raw sha256 digest.
 
@@ -41,6 +54,7 @@ def _intern(conn: sqlite3.Connection, value: Any) -> bytes | None:
     """
     if value is _MISSING:
         return None
+    value = _strip_cache_control(value)
     data = _canonical(value)
     digest = hashlib.sha256(data).digest()
     conn.execute(
