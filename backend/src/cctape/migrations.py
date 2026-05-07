@@ -212,9 +212,187 @@ def _migration_v2_message_refs(conn: sqlite3.Connection) -> None:
     conn.execute("VACUUM")
 
 
+def _migration_v3_block_intern_system(conn: sqlite3.Connection) -> None:
+    """Rewrite each `requests.system_hash` blob into block-interned form.
+
+    The system field of an Anthropic request is a list of content blocks. The
+    first block is a per-request billing header (always unique), but the
+    following blocks (preamble + system-prompt body) are nearly identical
+    across all requests, so the array as a whole hashes uniquely while its
+    bulk content repeats. Block interning stores each element separately and
+    leaves a list of `__cctape_ref__` markers behind in the array blob.
+
+    Scope: walks only blobs reachable via `requests.system_hash` rather than
+    inspecting every blob, so there's no schema-shape predicate involved and
+    no risk of accidentally rewriting a tools blob (which has the same
+    list-of-typed-dicts shape but is referenced via `requests.tools_hash`
+    with an FK constraint).
+
+    On a ~600 MB archive this typically recovers ~200 MB.
+    """
+    import gzip
+    import hashlib
+    import json
+
+    from .storage import _REF_KEY, _strip_cache_control
+
+    def canon(value: object) -> bytes:
+        return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+    def gz(data: bytes) -> bytes:
+        return gzip.compress(data, compresslevel=6, mtime=0)
+
+    # Distinct system_hash values currently in use. A blob no longer reachable
+    # via requests.system_hash isn't worth rewriting (it's just orphan data
+    # that VACUUM won't touch but a future GC pass could).
+    candidates = [
+        h
+        for (h,) in conn.execute(
+            "SELECT DISTINCT system_hash FROM requests WHERE system_hash IS NOT NULL"
+        )
+    ]
+    if not candidates:
+        return
+
+    _stderr(
+        f"cctape: migrating database — block-interning {len(candidates):,} "
+        f"system blobs..."
+    )
+    started = time.monotonic()
+    last_report = started
+
+    # Batch UPDATEs and INSERTs across many candidates per transaction.
+    BATCH = 200
+    processed = 0
+    skipped = 0
+    pending_blob_inserts: list[tuple[bytes, bytes]] = []
+    pending_request_updates: list[tuple[bytes, bytes]] = []  # (new_hash, old_hash)
+    pending_session_blob_inserts: list[tuple[str, bytes]] = []
+    pending_old_hash_deletes: list[bytes] = []
+
+    def flush() -> None:
+        if not (
+            pending_blob_inserts
+            or pending_request_updates
+            or pending_session_blob_inserts
+            or pending_old_hash_deletes
+        ):
+            return
+        with conn:
+            if pending_blob_inserts:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO blobs (hash, data) VALUES (?, ?)",
+                    pending_blob_inserts,
+                )
+            if pending_request_updates:
+                conn.executemany(
+                    "UPDATE requests SET system_hash = ? WHERE system_hash = ?",
+                    pending_request_updates,
+                )
+            if pending_session_blob_inserts:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO session_blobs (session_id, hash) "
+                    "VALUES (?, ?)",
+                    pending_session_blob_inserts,
+                )
+            if pending_old_hash_deletes:
+                conn.executemany(
+                    "DELETE FROM session_blobs WHERE hash = ?",
+                    [(h,) for h in pending_old_hash_deletes],
+                )
+                conn.executemany(
+                    "DELETE FROM fts_hash WHERE hash = ?",
+                    [(h,) for h in pending_old_hash_deletes],
+                )
+                # Old blobs are now unreferenced (requests.system_hash already
+                # repointed in the same transaction).
+                conn.executemany(
+                    "DELETE FROM blobs WHERE hash = ?",
+                    [(h,) for h in pending_old_hash_deletes],
+                )
+        pending_blob_inserts.clear()
+        pending_request_updates.clear()
+        pending_session_blob_inserts.clear()
+        pending_old_hash_deletes.clear()
+
+    for old_hash in candidates:
+        row = conn.execute(
+            "SELECT data FROM blobs WHERE hash = ?", (old_hash,)
+        ).fetchone()
+        if row is None:
+            skipped += 1
+            continue
+        try:
+            obj = json.loads(gzip.decompress(row[0]))
+        except Exception:
+            skipped += 1
+            continue
+        if not isinstance(obj, list) or not obj:
+            # Already in non-list form (e.g. a string, or an empty list edge
+            # case); skip.
+            skipped += 1
+            continue
+        # Already a ref-shape blob? Don't double-encode.
+        if all(isinstance(b, dict) and len(b) == 1 and _REF_KEY in b for b in obj):
+            skipped += 1
+            continue
+
+        # Strip cache_control defensively for blobs written before that fix.
+        obj = _strip_cache_control(obj)
+
+        # Intern each block. Pending inserts are flushed as part of the batch.
+        refs: list[dict[str, str]] = []
+        sub_hashes: list[bytes] = []
+        for block in obj:
+            block_canon = canon(block)
+            block_hash = hashlib.sha256(block_canon).digest()
+            pending_blob_inserts.append((block_hash, gz(block_canon)))
+            sub_hashes.append(block_hash)
+            refs.append({_REF_KEY: block_hash.hex()})
+
+        new_canon = canon(refs)
+        new_hash = hashlib.sha256(new_canon).digest()
+        pending_blob_inserts.append((new_hash, gz(new_canon)))
+
+        if new_hash != old_hash:
+            pending_request_updates.append((new_hash, old_hash))
+            # Carry over session_blobs entries: any session that referenced
+            # the old root needs (session, new_root) and (session, sub_block)
+            # for FTS by-session search to keep working.
+            for (sid,) in conn.execute(
+                "SELECT session_id FROM session_blobs WHERE hash = ?",
+                (old_hash,),
+            ):
+                pending_session_blob_inserts.append((sid, new_hash))
+                for sub in sub_hashes:
+                    pending_session_blob_inserts.append((sid, sub))
+            pending_old_hash_deletes.append(old_hash)
+
+        processed += 1
+        if processed % BATCH == 0:
+            flush()
+            now = time.monotonic()
+            if now - last_report >= 2.0:
+                _stderr(
+                    f"cctape: migrating database — "
+                    f"{processed:,} / {len(candidates):,} system blobs"
+                )
+                last_report = now
+
+    flush()
+    elapsed = time.monotonic() - started
+    _stderr(
+        f"cctape: block-interning complete — "
+        f"{processed:,} rewritten, {skipped:,} skipped in {elapsed:.1f}s"
+    )
+
+    conn.execute("VACUUM")
+
+
 _MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1_cache_creation_split,
     _migration_v2_message_refs,
+    _migration_v3_block_intern_system,
 ]
 
 

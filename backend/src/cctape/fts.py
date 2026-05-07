@@ -19,7 +19,7 @@ import re
 import sqlite3
 from typing import Any
 
-from .storage import decompress, load_message_hashes
+from .storage import collect_ref_digests, decompress, load_message_hashes
 
 logger = logging.getLogger(__name__)
 
@@ -154,12 +154,12 @@ def index_request_blobs(
     insert — at worst, new rows are not searchable until the next backfill.
     """
     try:
-        digests: list[bytes] = []
+        seeds: list[bytes] = []
         if system_hash:
-            digests.append(system_hash)
+            seeds.append(system_hash)
         if tools_hash:
-            digests.append(tools_hash)
-        digests.extend(
+            seeds.append(tools_hash)
+        seeds.extend(
             load_message_hashes(
                 conn,
                 session_id=session_id,
@@ -167,9 +167,19 @@ def index_request_blobs(
                 message_refs_inline=message_refs_inline,
             )
         )
-        if not digests:
+        if not seeds:
             return
-        for digest in digests:
+        # Walk into ref blobs so the session is associated with the underlying
+        # block sub-blobs (which is where the searchable text actually lives
+        # post-block-interning). The traversal is content-addressed and dedupes
+        # naturally.
+        seen: set[bytes] = set()
+        queue = list(seeds)
+        while queue:
+            digest = queue.pop()
+            if digest in seen:
+                continue
+            seen.add(digest)
             row = conn.execute(
                 "SELECT data FROM blobs WHERE hash = ?", (digest,)
             ).fetchone()
@@ -181,6 +191,10 @@ def index_request_blobs(
                     "INSERT OR IGNORE INTO session_blobs (session_id, hash) VALUES (?, ?)",
                     (session_id, digest),
                 )
+            try:
+                queue.extend(collect_ref_digests(json.loads(decompress(row[0]))))
+            except (ValueError, OSError):
+                pass
     except Exception:
         logger.exception("failed to index request blobs")
 
@@ -213,8 +227,11 @@ def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
     max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
 
     # Populate session_blobs from requests newer than the watermark. The set
-    # collapses repeated (session, hash) pairs from conversation replay.
+    # collapses repeated (session, hash) pairs from conversation replay. Each
+    # seed digest is followed through `__cctape_ref__` markers so block
+    # sub-blobs are also associated with the session.
     pairs: set[tuple[str, bytes]] = set()
+    seen_per_session: dict[str, set[bytes]] = {}
     for (
         session_id,
         system_hash,
@@ -230,17 +247,36 @@ def backfill(conn: sqlite3.Connection) -> tuple[int, int]:
         """,
         (last_id,),
     ).fetchall():
+        seeds: list[bytes] = []
         if system_hash:
-            pairs.add((session_id, system_hash))
+            seeds.append(system_hash)
         if tools_hash:
-            pairs.add((session_id, tools_hash))
-        for h in load_message_hashes(
-            conn,
-            session_id=session_id,
-            message_refs=message_refs,
-            message_refs_inline=message_refs_inline,
-        ):
-            pairs.add((session_id, h))
+            seeds.append(tools_hash)
+        seeds.extend(
+            load_message_hashes(
+                conn,
+                session_id=session_id,
+                message_refs=message_refs,
+                message_refs_inline=message_refs_inline,
+            )
+        )
+        seen = seen_per_session.setdefault(session_id, set())
+        queue = list(seeds)
+        while queue:
+            digest = queue.pop()
+            if digest in seen:
+                continue
+            seen.add(digest)
+            pairs.add((session_id, digest))
+            row = conn.execute(
+                "SELECT data FROM blobs WHERE hash = ?", (digest,)
+            ).fetchone()
+            if row is None:
+                continue
+            try:
+                queue.extend(collect_ref_digests(json.loads(decompress(row[0]))))
+            except (ValueError, OSError):
+                pass
 
     before = conn.execute("SELECT COUNT(*) FROM session_blobs").fetchone()[0]
     conn.executemany(

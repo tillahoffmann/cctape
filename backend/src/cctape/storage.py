@@ -23,6 +23,11 @@ from typing import Any
 
 _MISSING = object()
 _HASH_SIZE = 32  # raw sha256 digest
+# Marker used by block-level interning. A blob whose JSON contains
+# `{"__cctape_ref__": "<hex>"}` dicts is a "ref blob"; readers transparently
+# inline the referenced sub-blob via `_resolve_refs`. The sentinel name avoids
+# any chance of colliding with Anthropic API content.
+_REF_KEY = "__cctape_ref__"
 
 
 def compress(data: bytes) -> bytes:
@@ -71,11 +76,89 @@ def _intern(conn: sqlite3.Connection, value: Any) -> bytes | None:
     return digest
 
 
+def _intern_blocks(conn: sqlite3.Connection, value: Any) -> bytes | None:
+    """Intern a list value element-by-element, leaving `__cctape_ref__` markers.
+
+    Used for the `system` field of an Anthropic request. The system array's
+    first element is the per-request billing header (always unique), but
+    elements 1+ are nearly identical across all requests in a session — block
+    interning collapses those to a single blob each. Returns None for the
+    `_MISSING` sentinel; falls back to `_intern` for non-list values.
+    """
+    if value is _MISSING:
+        return None
+    value = _strip_cache_control(value)
+    if not isinstance(value, list) or not value:
+        return _intern(conn, value)
+    refs = [{_REF_KEY: _intern(conn, block).hex()} for block in value]  # type: ignore[union-attr]
+    return _intern(conn, refs)
+
+
 def _load_blob(conn: sqlite3.Connection, digest: bytes) -> bytes:
     row = conn.execute("SELECT data FROM blobs WHERE hash = ?", (digest,)).fetchone()
     if row is None:
         raise KeyError(f"blob {digest.hex()} missing")
     return decompress(row[0])
+
+
+# Sub-blobs are stored via `_intern` (flat), so a single ref-resolution step is
+# always enough. This bound catches accidental cycles or nested-ref bugs without
+# adding cost on the happy path.
+_MAX_REF_DEPTH = 4
+
+
+def _resolve_refs(conn: sqlite3.Connection, value: Any, depth: int = 0) -> Any:
+    """Recursively replace `{__cctape_ref__: <hex>}` markers with their content.
+
+    Block-level interning stores list elements as separate blobs and leaves a
+    ref-marker dict in their place. This helper transparently rehydrates the
+    original structure on read. A no-op for blobs that don't contain any
+    markers (i.e. non-block-interned values).
+    """
+    if depth > _MAX_REF_DEPTH:
+        raise ValueError(f"ref depth exceeded {_MAX_REF_DEPTH}; nested-ref bug?")
+    if isinstance(value, dict):
+        if len(value) == 1 and _REF_KEY in value:
+            digest = bytes.fromhex(value[_REF_KEY])
+            return _load_value(conn, digest, depth=depth + 1)
+        return {k: _resolve_refs(conn, v, depth) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_refs(conn, v, depth) for v in value]
+    return value
+
+
+def _load_value(conn: sqlite3.Connection, digest: bytes, depth: int = 0) -> Any:
+    """Load a blob, JSON-decode it, and resolve any block refs.
+
+    Equivalent to `json.loads(_load_blob(...))` for blobs that don't contain
+    `__cctape_ref__` markers; for blobs that do, fetches and inlines the
+    referenced block content.
+    """
+    raw = _load_blob(conn, digest)
+    return _resolve_refs(conn, json.loads(raw), depth)
+
+
+def collect_ref_digests(value: Any) -> list[bytes]:
+    """Return every `__cctape_ref__` digest reachable from `value`.
+
+    Used by FTS indexing to discover block sub-blobs so they can be associated
+    with the right session, and by GC to walk the live set.
+    """
+    out: list[bytes] = []
+
+    def _walk(v: Any) -> None:
+        if isinstance(v, dict):
+            if len(v) == 1 and _REF_KEY in v:
+                out.append(bytes.fromhex(v[_REF_KEY]))
+                return
+            for vv in v.values():
+                _walk(vv)
+        elif isinstance(v, list):
+            for vv in v:
+                _walk(vv)
+
+    _walk(value)
+    return out
 
 
 def _split_hashes(packed: bytes | None) -> list[bytes]:
@@ -214,7 +297,7 @@ def decompose_payload(
     if not isinstance(parsed, dict):
         raise ValueError("request body is not a JSON object")
 
-    system_hash = _intern(conn, parsed.pop("system", _MISSING))
+    system_hash = _intern_blocks(conn, parsed.pop("system", _MISSING))
     tools_hash = _intern(conn, parsed.pop("tools", _MISSING))
     messages = parsed.pop("messages", [])
     if not isinstance(messages, list):
@@ -275,9 +358,9 @@ def reconstruct_payload(
 
     result: dict[str, Any] = json.loads(decompress(extras)) if extras else {}
     if system_hash is not None:
-        result["system"] = json.loads(_load_blob(conn, system_hash))
+        result["system"] = _load_value(conn, system_hash)
     if tools_hash is not None:
-        result["tools"] = json.loads(_load_blob(conn, tools_hash))
+        result["tools"] = _load_value(conn, tools_hash)
     hashes = load_message_hashes(
         conn,
         session_id=session_id,
@@ -285,7 +368,7 @@ def reconstruct_payload(
         message_refs_inline=message_refs_inline,
     )
     if hashes or message_refs is not None or message_refs_inline is not None:
-        result["messages"] = [json.loads(_load_blob(conn, h)) for h in hashes]
+        result["messages"] = [_load_value(conn, h) for h in hashes]
     return result
 
 
@@ -305,7 +388,7 @@ def first_message(
         message_refs_inline=message_refs_inline,
     )
     if hashes:
-        return json.loads(_load_blob(conn, hashes[0]))
+        return _load_value(conn, hashes[0])
     if payload is None:
         return None
     try:
@@ -340,4 +423,4 @@ def last_message(
     )
     if not hashes:
         return None
-    return json.loads(_load_blob(conn, hashes[-1]))
+    return _load_value(conn, hashes[-1])
