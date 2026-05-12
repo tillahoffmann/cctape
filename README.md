@@ -78,8 +78,10 @@ cd frontend && npm install && npm run build
 Start the backend with reload:
 
 ```bash
-cd backend && uv run uvicorn --reload --factory --port=5555 cctape:create_app
+cd backend && uv run uvicorn --reload --reload-dir src --factory --port=5555 cctape:create_app
 ```
+
+`--reload-dir src` scopes the file watcher to backend source; without it uvicorn walks the whole repo (including `frontend/node_modules` and `.venv`) on every poll and pegs a CPU core.
 
 Open <http://127.0.0.1:5555>.
 
