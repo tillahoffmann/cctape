@@ -86,6 +86,13 @@ async def lifespan(app: FastAPI):
             app.state.db_path = str(database)
 
             conn.execute("PRAGMA foreign_keys = ON")
+            # WAL journaling survives an unclean shutdown (kill / crash / disk
+            # full) far better than the default rollback journal, which is how
+            # the archive previously corrupted its FTS5 index. synchronous=NORMAL
+            # is the standard WAL pairing: durable against app crashes, only the
+            # last commit is at risk on OS-level power loss.
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
             if not db_exists:
                 schema_path = Path(__file__).parent / "schema.sql"
                 conn.executescript(schema_path.read_text())
