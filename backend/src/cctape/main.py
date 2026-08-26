@@ -79,7 +79,17 @@ async def lifespan(app: FastAPI):
     db_exists = database.is_file()
 
     # Nested withs because one is async and one is sync.
-    async with httpx.AsyncClient(timeout=None) as client:
+    # http2 + a long keepalive_expiry keep the upstream connection warm between
+    # turns. httpx defaults to expiry=5s, which drops the pooled connection
+    # during any pause longer than that -- i.e. most interactive turns -- making
+    # the next request pay a full TCP+TLS handshake. On a weak link that
+    # handshake costs seconds, so the proxy was slower than talking to Anthropic
+    # directly (which holds an HTTP/2 connection open).
+    async with httpx.AsyncClient(
+        timeout=None,
+        http2=True,
+        limits=httpx.Limits(max_keepalive_connections=20, keepalive_expiry=300.0),
+    ) as client:
         with closing(sqlite3.connect(database)) as conn:
             app.state.http_client = client
             app.state.conn = conn
